@@ -1,0 +1,37 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "seed": "node scripts/seedLeads.js",
+    "check-duplicate-phones": "node scripts/checkDuplicatePhones.js",
+    "migrate:deleted-status": "node scripts/migrateDeletedStatus.js",
+    "migrate:pending-status": "node scripts/migratePendingStatus.js",
+    "migrate:status-updated-at": "node scripts/backfillStatusUpdatedAt.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "csv-parse": "^7.0.1",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "express-validator": "^7.3.2",
+    "firebase-admin": "^14.0.0",
+    "helmet": "^8.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.18.0",
+    "multer": "^2.2.0",
+    "node-cron": "^4.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
