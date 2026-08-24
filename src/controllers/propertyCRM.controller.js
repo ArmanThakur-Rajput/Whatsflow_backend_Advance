@@ -263,3 +263,27 @@ exports.deletePhoto = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
+// GET /api/property-crm/properties/:id/gallery
+exports.getGalleryPage = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id).select('projectName photos');
+    if (!property) return res.status(404).send('Not found');
+
+    const photoTags = property.photos
+      .map(url => `<img src="${url}" style="width:100%;margin-bottom:10px;border-radius:8px;">`)
+      .join('');
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${property.projectName}</title>
+  <style>body{margin:0;padding:10px;background:#111;} img{display:block;width:100%;}</style>
+</head>
+<body>${photoTags}</body>
+</html>`);
+  } catch (err) {
+    res.status(500).send('Error');
+  }
+};

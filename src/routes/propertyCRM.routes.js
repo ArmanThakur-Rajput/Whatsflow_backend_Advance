@@ -6,6 +6,9 @@ const imageUpload = require('../middleware/imageUploadMiddleware'); // images â€
 const ctrl = require('../controllers/propertyCRM.controller');
 const importCtrl = require('../controllers/propertyImport.controller');
 
+// Public gallery page â€” no auth needed (shared via WhatsApp)
+router.get('/properties/:id/gallery', ctrl.getGalleryPage);
+
 router.use(auth, adminOnly);
 
 // Master data
