@@ -1,12 +1,12 @@
 const router = require('express').Router();
 const auth = require('../middleware/auth');
 const adminOnly = require('../middleware/adminOnly');
-const upload = require('../middleware/uploadMiddleware');        // CSV — for import
-const imageUpload = require('../middleware/imageUploadMiddleware'); // images — for photos
+const upload = require('../middleware/uploadMiddleware');
+const imageUpload = require('../middleware/imageUploadMiddleware');
 const ctrl = require('../controllers/propertyCRM.controller');
 const importCtrl = require('../controllers/propertyImport.controller');
 
-// Public gallery page — no auth needed (shared via WhatsApp)
+// Public — no auth (shared via WhatsApp)
 router.get('/properties/:id/gallery', ctrl.getGalleryPage);
 
 router.use(auth, adminOnly);
@@ -28,9 +28,10 @@ router.get('/properties', ctrl.getProperties);
 router.get('/properties/:id', ctrl.getPropertyById);
 router.post('/properties', ctrl.createProperty);
 router.patch('/properties/:id', ctrl.updateProperty);
+router.delete('/properties/:id', ctrl.deleteProperty);        // ← Property delete (new)
 router.patch('/properties/:id/status', ctrl.setPropertyStatus);
 
-// Photos — multipart/form-data, field name: "photos", max 10 at once, 5MB each
+// Photos
 router.post('/properties/:id/photos', imageUpload.array('photos', 10), ctrl.uploadPhotos);
 router.delete('/properties/:id/photos', ctrl.deletePhoto);
 
