@@ -320,7 +320,7 @@ exports.getGalleryPage = async (req, res) => {
 
     // Set permissive CSP so R2/Cloudflare images load correctly
     res.setHeader('Content-Security-Policy',
-      "default-src 'none'; img-src *; style-src 'unsafe-inline'; script-src 'none';"
+      "default-src 'none'; img-src *; style-src 'unsafe-inline'; script-src 'unsafe-inline';"
     );
 
     res.send(`<!DOCTYPE html>
