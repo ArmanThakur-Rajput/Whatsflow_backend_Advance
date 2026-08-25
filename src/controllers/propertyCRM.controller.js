@@ -356,7 +356,7 @@ exports.getGalleryPage = async (req, res) => {
     .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: ${statusColor}; }
     .badge-type { background: rgba(255,255,255,0.08); color: #d1d5db; }
     .badge-intent { background: rgba(99,102,241,0.15); color: #a5b4fc; }
-    .price { font-size: 22px; font-weight: 800; color: #6366f1; margin-top: 10px; }
+    .price { font-size: 22px; font-weight: 800; color: #ffffff; margin-top: 10px; }
     .location { font-size: 13px; color: #9ca3af; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
 
     /* ── Hero ── */
@@ -469,7 +469,7 @@ exports.getGalleryPage = async (req, res) => {
       ${property.propertyType ? `<span class="badge badge-type">${property.propertyType}</span>` : ''}
       <span class="badge badge-intent">${intentLabel}</span>
     </div>
-    ${property.price ? `<div class="price">₹ ${property.price}</div>` : ''}
+    ${property.price ? `<div class="price" id="price-display">₹ ${property.price}</div>` : ''}
   </div>
 
   <!-- Hero Photo -->
@@ -477,9 +477,6 @@ exports.getGalleryPage = async (req, res) => {
 
   <!-- Grid -->
   ${gridPhotos.length > 0 ? `<div class="section-label">All Photos</div><div class="grid">${gridTags}</div>` : ''}
-
-  <!-- Footer -->
-  <div class="footer">Shared via <span style="color:#ffffff">Kin Property</span> <span style="color:#f5c518">Management</span></div>
 
   <!-- Lightbox -->
   <div id="lb">
@@ -496,6 +493,24 @@ exports.getGalleryPage = async (req, res) => {
   </div>
 
   <script>
+    // Format price
+    function formatPrice(raw) {
+      if (!raw) return '';
+      if (raw.includes('(')) return raw; // already formatted
+      var num = parseFloat(raw.replace(/,/g, ''));
+      if (isNaN(num) || num === 0) return raw;
+      var short = '';
+      if (num >= 10000000) short = (num / 10000000).toFixed(2).replace(/\\.?0+$/, '') + ' Cr';
+      else if (num >= 100000) short = (num / 100000).toFixed(2).replace(/\\.?0+$/, '') + ' L';
+      else if (num >= 1000) short = (num / 1000).toFixed(1).replace(/\\.?0+$/, '') + 'k';
+      return short ? raw + ' (' + short + ')' : raw;
+    }
+    var priceEl = document.getElementById('price-display');
+    if (priceEl) {
+      var raw = '${property.price || ''}';
+      if (raw) priceEl.textContent = '₹ ' + formatPrice(raw);
+    }
+
     var photos = ${JSON.stringify(property.photos)};
     var current = 0;
     var lb = document.getElementById('lb');
