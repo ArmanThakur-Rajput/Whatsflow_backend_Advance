@@ -4,17 +4,19 @@ const asyncHandler = require('../utils/asyncHandler');
 const { parse } = require('csv-parse/sync');
 
 // Fixed CSV columns for property import
+const FLAT_CONFIGS = ['1RK', '1BHK', '2BHK', '3BHK', '4BHK', '4BHK+'];
+
 const PROPERTY_COLUMNS = [
-  'projectName', 'intent', 'propertyType', 'carpetArea',
-  'buildupArea', 'location', 'address', 'price',
+  'projectName', 'intent', 'propertyType', 'flatConfig', 'carpetArea',
+  'buildupArea', 'plotArea', 'location', 'address', 'price',
   'amenities', 'parking', 'notes', 'ownerName', 'ownerPhone',
 ];
 
 // GET /property-crm/import/template
 exports.downloadPropertyTemplate = asyncHandler(async (req, res) => {
   const exampleRow = [
-    'Sunrise Heights', 'buy', 'Flat', '850',
-    '1100', 'Baner', '123 Main Street Baner Pune', '4500000',
+    'Sunrise Heights', 'buy', 'Flat', '2BHK', '850',
+    '1100', '', 'Baner', '123 Main Street Baner Pune', '4500000',
     'Swimming Pool;Gym;Security', 'Covered', 'Corner flat on 3rd floor',
     'Rajesh Kumar', '9876543210',
   ];
@@ -99,6 +101,29 @@ exports.importProperties = asyncHandler(async (req, res) => {
       continue;
     }
 
+    // Flat → flatConfig required and must be valid
+    const propertyType = String(row.propertyType).trim();
+    if (propertyType === 'Flat') {
+      const flatConfig = String(row.flatConfig || '').trim();
+      if (!flatConfig) {
+        errors.push({ row: rowNum, name: row.projectName, reason: 'flatConfig is required for Flat (e.g. 1RK, 1BHK, 2BHK, 3BHK, 4BHK, 4BHK+)' });
+        continue;
+      }
+      if (!FLAT_CONFIGS.includes(flatConfig)) {
+        errors.push({ row: rowNum, name: row.projectName, reason: `flatConfig "${flatConfig}" is invalid — must be one of: ${FLAT_CONFIGS.join(', ')}` });
+        continue;
+      }
+    }
+
+    // Plot → plotArea required
+    if (propertyType === 'Plot') {
+      const plotArea = String(row.plotArea || '').trim();
+      if (!plotArea) {
+        errors.push({ row: rowNum, name: row.projectName, reason: 'plotArea is required for Plot (in sqft)' });
+        continue;
+      }
+    }
+
     // Duplicate check: same projectName + location + propertyType in this tenant
     const existing = await Property.findOne({
       tenantId,
@@ -127,8 +152,10 @@ exports.importProperties = asyncHandler(async (req, res) => {
         projectName: String(row.projectName).trim(),
         intent,
         propertyType: String(row.propertyType).trim(),
+        flatConfig: String(row.flatConfig || '').trim() || undefined,
         carpetArea: String(row.carpetArea || '').trim(),
         buildupArea: String(row.buildupArea || '').trim(),
+        plotArea: String(row.plotArea || '').trim() || undefined,
         location: String(row.location).trim(),
         address: String(row.address || '').trim(),
         price: String(row.price || '').trim(),
