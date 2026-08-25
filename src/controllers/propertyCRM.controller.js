@@ -465,9 +465,7 @@ exports.getGalleryPage = async (req, res) => {
     <div class="title">${property.projectName}</div>
     ${property.location ? `<div class="location">📍 ${property.location}</div>` : ''}
     <div class="meta-row">
-      <span class="badge badge-status"><span class="badge-dot"></span>${statusLabel}</span>
       ${property.propertyType ? `<span class="badge badge-type">${property.propertyType}</span>` : ''}
-      <span class="badge badge-intent">${intentLabel}</span>
     </div>
     ${property.price ? `<div class="price" id="price-display">₹ ${property.price}</div>` : ''}
   </div>
