@@ -156,6 +156,7 @@ exports.getProperties = async (req, res) => {
     const filter = { tenantId };
     if (req.query.location) filter.location = req.query.location;
     if (req.query.propertyType) filter.propertyType = req.query.propertyType;
+    if (req.query.flatConfig) filter.flatConfig = req.query.flatConfig;
     if (req.query.status) filter.status = req.query.status;
     const properties = await Property.find(filter).sort({ createdAt: -1 }).lean();
     res.json({ success: true, properties });
@@ -179,16 +180,16 @@ exports.createProperty = async (req, res) => {
   try {
     const tenantId = req.user.tenantId?.toString();
     const {
-      projectName, intent, propertyType, carpetArea, buildupArea,
-      location, address, price, amenities, parking, notes,
+      projectName, intent, propertyType, flatConfig, carpetArea, buildupArea,
+      plotArea, location, address, price, amenities, parking, notes,
       ownerName, ownerPhone,
     } = req.body;
     if (!projectName || !intent || !propertyType || !location) {
       return res.status(400).json({ success: false, message: 'projectName, intent, propertyType, location required' });
     }
     const property = await Property.create({
-      tenantId, projectName, intent, propertyType, carpetArea, buildupArea,
-      location, address, price, amenities, parking, notes,
+      tenantId, projectName, intent, propertyType, flatConfig, carpetArea, buildupArea,
+      plotArea, location, address, price, amenities, parking, notes,
       ownerName, ownerPhone, createdBy: req.user._id,
     });
     res.status(201).json({ success: true, property });
