@@ -208,8 +208,8 @@ exports.exportProperties = asyncHandler(async (req, res) => {
   };
 
   const headers = [
-    'Project Name', 'Intent', 'Property Type', 'Status',
-    'Carpet Area', 'Buildup Area', 'Location', 'Address',
+    'Project Name', 'Intent', 'Property Type', 'Flat Config', 'Plot Area (sqft)', 'Status',
+    'Carpet Area (sqft)', 'Buildup Area (sqft)', 'Location', 'Address',
     'Price', 'Amenities', 'Parking', 'Notes',
     'Owner Name', 'Owner Phone', 'Created At',
   ];
@@ -220,6 +220,8 @@ exports.exportProperties = asyncHandler(async (req, res) => {
       escape(p.projectName),
       escape(p.intent),
       escape(p.propertyType),
+      escape(p.flatConfig),
+      escape(p.plotArea),
       escape(p.status),
       escape(p.carpetArea),
       escape(p.buildupArea),
