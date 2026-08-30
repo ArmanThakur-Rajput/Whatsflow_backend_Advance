@@ -11,6 +11,7 @@ router.use(auth);
 // Dashboard & follow-ups (no :id — must be before /:id routes)
 router.get('/dashboard',            ctrl.getDashboardStats);
 router.get('/followups/today',      ctrl.getTodayFollowUps);
+router.get('/followups/all',        ctrl.getAllFollowUps);
 router.patch('/followup/:followUpId/complete', ctrl.completeFollowUp);
 
 // Employee-specific lead lists (today / pending / booked)

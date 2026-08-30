@@ -568,6 +568,19 @@ exports.getTodayFollowUps = asyncHandler(async (req, res) => {
   res.json({ followUps, total: followUps.length });
 });
 
+// GET /leads/followups/all  (admin — all employees, all dates, not completed)
+exports.getAllFollowUps = asyncHandler(async (req, res) => {
+  const followUps = await FollowUp.find({
+    tenantId: req.user.tenantId,
+    isCompleted: false,
+  })
+    .populate('lead', 'name phone status')
+    .populate('employee', 'name email')
+    .sort({ date: 1, time: 1 });
+
+  res.json({ followUps, total: followUps.length });
+});
+
 // PATCH /leads/followup/:followUpId/complete
 exports.completeFollowUp = asyncHandler(async (req, res) => {
   const followUp = await FollowUp.findOne({ _id: req.params.followUpId, tenantId: req.user.tenantId });
