@@ -594,6 +594,16 @@ exports.completeFollowUp = asyncHandler(async (req, res) => {
   res.json({ message: 'Follow-up marked complete', followUp });
 });
 
+// DELETE /leads/followup/:followUpId  (admin — hard delete from DB)
+exports.deleteFollowUp = asyncHandler(async (req, res) => {
+  const followUp = await FollowUp.findOneAndDelete({
+    _id: req.params.followUpId,
+    tenantId: req.user.tenantId,
+  });
+  if (!followUp) return res.status(404).json({ message: 'Follow-up not found' });
+  res.json({ message: 'Follow-up deleted' });
+});
+
 // PATCH /leads/:id/info
 exports.updateLeadInfo = asyncHandler(async (req, res) => {
   const { name, phone, email, city, car, campaign, customFields } = req.body;

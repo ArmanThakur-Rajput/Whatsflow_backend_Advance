@@ -13,6 +13,7 @@ router.get('/dashboard',            ctrl.getDashboardStats);
 router.get('/followups/today',      ctrl.getTodayFollowUps);
 router.get('/followups/all',        ctrl.getAllFollowUps);
 router.patch('/followup/:followUpId/complete', ctrl.completeFollowUp);
+router.delete('/followup/:followUpId',         ctrl.deleteFollowUp);
 
 // Employee-specific lead lists (today / pending / booked)
 router.get('/employee-today',       ctrl.getEmployeeTodayLeads);
