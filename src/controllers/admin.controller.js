@@ -352,7 +352,7 @@ exports.toggleEmployeeStatus = asyncHandler(async (req, res) => {
 
 // Get All Leads (Admin) — paginated archive/history
 exports.getAllLeads = asyncHandler(async (req, res) => {
-  const { search, status, employee, dateFrom, dateTo, month, year, page = 1, limit = 50 } = req.query;
+  const { search, status, employee, dateFrom, dateTo, month, year, page = 1, limit = 99999 } = req.query;
   const { tenantId } = req.user;
   let filter = { tenantId };
 
