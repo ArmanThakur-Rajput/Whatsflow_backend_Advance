@@ -648,10 +648,10 @@ exports.getUpcomingVisitors = asyncHandler(async (req, res) => {
     .lean();
 
   // Today ki date "DD MMM YYYY" format mein (IST) — same format jisme stored hai
-  const todayStr = new Date().toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    timeZone: 'Asia/Kolkata',
-  });
+  // Note: toLocaleDateString('en-IN') "Sept" return karta hai Node mein — isliye manual format
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const nowIST = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000));
+  const todayStr = `${String(nowIST.getUTCDate()).padStart(2,'0')} ${MONTH_NAMES[nowIST.getUTCMonth()]} ${nowIST.getUTCFullYear()}`;
 
   // "02 Aug 2026" ko Date object mein convert karne ke liye
   const MONTHS = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
