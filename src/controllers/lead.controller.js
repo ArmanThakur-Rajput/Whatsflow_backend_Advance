@@ -772,7 +772,7 @@ exports.updateVisitorDate = asyncHandler(async (req, res) => {
   const lead = await getOwnedLead(req, res);
   if (!lead) return;
 
-  lead.visitorDate = visitorDate;
+  lead.visitorDate = visitorDate.replace('Sept', 'Sep');
   // visitorTime optional hai — null bhejne par clear ho jata hai
   lead.visitorTime = visitorTime || '';
 
