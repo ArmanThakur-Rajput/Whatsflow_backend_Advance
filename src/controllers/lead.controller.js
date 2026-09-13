@@ -772,7 +772,18 @@ exports.updateVisitorDate = asyncHandler(async (req, res) => {
   const lead = await getOwnedLead(req, res);
   if (!lead) return;
 
-  lead.visitorDate = visitorDate.replace('Sept', 'Sep');
+  const MONTHS_MAP = {
+    'Jan':'Jan','Feb':'Feb','Mar':'Mar','Apr':'Apr','May':'May','Jun':'Jun',
+    'Jul':'Jul','Aug':'Aug','Sep':'Sep','Sept':'Sep','Oct':'Oct','Nov':'Nov','Dec':'Dec',
+  };
+  // iOS dash format fix: "13-Sep-2026" → "13 Sep 2026"
+  let cleanDate = visitorDate.replace(
+    /(\d{1,2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)-(\d{4})/i,
+    (_, d, m, y) => `${d.padStart(2, '0')} ${MONTHS_MAP[m] || m} ${y}`
+  );
+  // Android Sept fix: "13 Sept 2026" → "13 Sep 2026"
+  cleanDate = cleanDate.replace('Sept', 'Sep');
+  lead.visitorDate = cleanDate;
   // visitorTime optional hai — null bhejne par clear ho jata hai
   lead.visitorTime = visitorTime || '';
 
