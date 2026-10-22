@@ -76,6 +76,7 @@ app.use('/api/schedule', require('./routes/schedule.routes'));
 app.use('/api/custom-fields', require('./routes/customField.routes'));
 app.use('/api/super-admin', require('./routes/superAdmin.routes'));
 app.use('/api/property-crm', require('./routes/propertyCRM.routes'));
+app.use('/api/property-requests', require('./routes/propertyRequests.routes'));
 
 
 app.get('/', (req, res) => {
