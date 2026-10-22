@@ -20,10 +20,16 @@ exports.getAdminStats = asyncHandler(async (req, res) => {
   const todayFilter = { tenantId, createdAt: { $gte: today, $lte: todayEnd } };
   const monthFilter = { tenantId, createdAt: { $gte: monthStart } };
 
+  // Today IST string for upcomingVisitors filter (same logic as getUpcomingVisitors)
+  const MONTH_NAMES_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const nowIST = new Date(new Date().getTime() + (5.5 * 60 * 60 * 1000));
+  const todayVisitorStr = `${String(nowIST.getUTCDate()).padStart(2,'0')} ${MONTH_NAMES_SHORT[nowIST.getUTCMonth()]} ${nowIST.getUTCFullYear()}`;
+
   const [
     monthLeads, todayLeads, interested,
     contacted, notInterested, bookedToday, activeEmployees,
     monthBooked, appointmentsToday, pendingLeads, allBooked,
+    totalLeads, allVisitorLeads,
   ] = await Promise.all([
     Lead.countDocuments(monthFilter),
     Lead.countDocuments(todayFilter),
@@ -36,7 +42,26 @@ exports.getAdminStats = asyncHandler(async (req, res) => {
     Appointment.countDocuments({ tenantId, appointmentDate: todayKey }),
     Lead.countDocuments({ tenantId, status: 'Pending' }),
     Lead.countDocuments({ tenantId, status: 'Booked' }),
+    Lead.countDocuments({ tenantId, isDeleted: false }),
+    Lead.find({ tenantId, isDeleted: false, visitorDate: { $nin: ['', null] } }, 'visitorDate').lean(),
   ]);
+
+  // Filter upcoming visitors (today + future) same logic as getUpcomingVisitors
+  const MONTHS_MAP = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+  function parseVDate(str) {
+    if (!str) return null;
+    const parts = str.trim().split(/\s+/);
+    if (parts.length !== 3) return null;
+    const [day, mon, year] = parts;
+    const m = MONTHS_MAP[mon];
+    if (m === undefined) return null;
+    return new Date(+year, m, +day);
+  }
+  const todayDateObj = parseVDate(todayVisitorStr);
+  const upcomingVisitors = allVisitorLeads.filter((lead) => {
+    const vd = parseVDate(lead.visitorDate);
+    return vd && todayDateObj && vd >= todayDateObj;
+  }).length;
 
   const conversionRate = monthLeads > 0
     ? Math.round((monthBooked / monthLeads) * 100)
@@ -45,6 +70,7 @@ exports.getAdminStats = asyncHandler(async (req, res) => {
   res.json({
     monthLeads,
     todayLeads,
+    totalLeads,
     interested, contacted, notInterested,
     booked: bookedToday,
     allBooked,
@@ -52,6 +78,7 @@ exports.getAdminStats = asyncHandler(async (req, res) => {
     conversionRate,
     appointmentsToday,
     pendingLeads,
+    upcomingVisitors,
   });
 });
 
