@@ -181,16 +181,19 @@ exports.createProperty = async (req, res) => {
     const tenantId = req.user.tenantId?.toString();
     const {
       projectName, intent, propertyType, flatConfig, carpetArea, buildupArea,
-      plotArea, location, address, price, amenities, parking, notes,
-      ownerName, ownerPhone,
+      plotArea, buildingArea, flatsOnFloor, lift, wings, facing,
+      location, address, price, sanction, parking, water, floor,
+      amenities, notes, ownerName, ownerPhone, tenantPhone, gmapsLink,
     } = req.body;
-    if (!projectName || !intent || !propertyType || !location) {
-      return res.status(400).json({ success: false, message: 'projectName, intent, propertyType, location required' });
+    if (!projectName || !propertyType || !location || !price || !sanction || !parking || !water || !floor) {
+      return res.status(400).json({ success: false, message: 'projectName, propertyType, location, price, sanction, parking, water, floor are required' });
     }
     const property = await Property.create({
-      tenantId, projectName, intent, propertyType, flatConfig, carpetArea, buildupArea,
-      plotArea, location, address, price, amenities, parking, notes,
-      ownerName, ownerPhone, createdBy: req.user._id,
+      tenantId, projectName, intent: intent || 'buy', propertyType, flatConfig,
+      carpetArea, buildupArea, plotArea, buildingArea, flatsOnFloor, lift, wings, facing,
+      location, address, price, sanction, parking, water, floor,
+      amenities: amenities || [], notes, ownerName, ownerPhone, tenantPhone, gmapsLink,
+      createdBy: req.user._id,
     });
     res.status(201).json({ success: true, property });
   } catch (err) {
@@ -598,5 +601,54 @@ exports.getGalleryPage = async (req, res) => {
 </html>`);
   } catch (err) {
     res.status(500).send('Error loading gallery');
+  }
+};
+
+// ─── GET /api/property-crm/properties/export-csv ─────────────────────────────
+exports.exportCSV = async (req, res) => {
+  try {
+    const tenantId = req.user.tenantId?.toString();
+    const filter = { tenantId };
+    if (req.query.status) filter.status = req.query.status;
+    if (req.query.propertyType) filter.propertyType = req.query.propertyType;
+    if (req.query.location) filter.location = req.query.location;
+
+    const properties = await Property.find(filter).sort({ createdAt: -1 }).lean();
+
+    const escape = (val) => {
+      const str = val == null ? '' : String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const headers = [
+      'Project Name', 'Type', 'Location', 'Price', 'Floor',
+      'Carpet Area', 'Buildup Area', 'Sanction', 'Parking', 'Water',
+      'Lift', 'Wings', 'Facing', 'Flats on Floor', 'Building Area',
+      'Amenities', 'Status', 'Owner Name', 'Owner Phone', 'Tenant Phone',
+      'GMaps Link', 'Notes', 'Created At',
+    ];
+
+    const rows = [headers.join(',')];
+    properties.forEach((p) => {
+      rows.push([
+        escape(p.projectName), escape(p.propertyType), escape(p.location),
+        escape(p.price), escape(p.floor), escape(p.carpetArea), escape(p.buildupArea),
+        escape(p.sanction), escape(p.parking), escape(p.water),
+        escape(p.lift), escape(p.wings), escape(p.facing), escape(p.flatsOnFloor),
+        escape(p.buildingArea), escape((p.amenities || []).join('; ')),
+        escape(p.status), escape(p.ownerName), escape(p.ownerPhone),
+        escape(p.tenantPhone), escape(p.gmapsLink), escape(p.notes),
+        escape(p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : ''),
+      ].join(','));
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="properties.csv"');
+    res.send(rows.join('\n'));
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 };
