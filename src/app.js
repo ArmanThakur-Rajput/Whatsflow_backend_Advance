@@ -8,6 +8,7 @@ const validateEnv = require('./config/validateEnv');
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 const { startScheduler } = require('./utils/scheduler');
 const { startVisitorDateNotifier, scheduleDayOfNotifications } = require('./utils/visitorDateNotifier');
+const { startPropertyRequestNotifier } = require('./utils/propertyRequestNotifier');
 
 validateEnv(); // fail fast before anything else boots
 
@@ -21,6 +22,7 @@ connectDB();
 // (tenantId filter added to scheduler.js) so it's safe to run.
 startScheduler();
 startVisitorDateNotifier();
+startPropertyRequestNotifier();
 
 // --- Security headers ---
 app.use(helmet());
