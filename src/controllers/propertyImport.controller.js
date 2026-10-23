@@ -3,28 +3,26 @@ const PropertyMasterData = require('../models/PropertyMasterData.model');
 const asyncHandler = require('../utils/asyncHandler');
 const { parse } = require('csv-parse/sync');
 
-// Fixed CSV columns for property import
+// Minimal CSV columns required by Property.model.js.
+// Flat/Plot have additional conditional fields documented in the UI.
 const FLAT_CONFIGS = ['1RK', '1BHK', '2BHK', '3BHK', '4BHK', '4BHK+'];
 
 const PROPERTY_COLUMNS = [
-  'projectName', 'intent', 'propertyType', 'flatConfig', 'carpetArea',
-  'buildupArea', 'plotArea', 'location', 'address', 'price',
-  'amenities', 'parking', 'notes', 'ownerName', 'ownerPhone',
+  'projectName', 'propertyType', 'location', 'price',
+  'sanction', 'parking', 'water', 'floor',
 ];
 
 // GET /property-crm/import/template
 exports.downloadPropertyTemplate = asyncHandler(async (req, res) => {
   const exampleRow = [
-    'Sunrise Heights', 'buy', 'Flat', '2BHK', '850',
-    '1100', '', 'Baner', '123 Main Street Baner Pune', '4500000',
-    'Swimming Pool;Gym;Security', 'Covered', 'Corner flat on 3rd floor',
-    'Rajesh Kumar', '9876543210',
+    'Sunrise Heights', 'Shop', 'Baner, Pune', '4500000',
+    'Yes', 'Covered', 'Municipal Corporation', 'Ground',
   ];
 
   const csvContent = [
     PROPERTY_COLUMNS.join(','),
     exampleRow.join(','),
-  ].join('\n');
+  ].join('\\n');
 
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="properties_template.csv"');
@@ -54,11 +52,9 @@ exports.importProperties = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: 'CSV is empty — no data rows found' });
   }
 
-  // Column check — must have at minimum projectName, intent, propertyType, location
+  // Column check — require only the fields marked required in Property.model.js.
   const uploadedColumns = Object.keys(rows[0]);
-  const missingRequired = ['projectName', 'intent', 'propertyType', 'location'].filter(
-    (c) => !uploadedColumns.includes(c)
-  );
+  const missingRequired = PROPERTY_COLUMNS.filter((c) => !uploadedColumns.includes(c));
   if (missingRequired.length) {
     return res.status(400).json({
       message: `Missing required columns: ${missingRequired.join(', ')}. Please download the template.`,
@@ -82,8 +78,8 @@ exports.importProperties = asyncHandler(async (req, res) => {
       continue;
     }
 
-    // Required: intent
-    const intent = String(row.intent || '').trim().toLowerCase();
+    // Optional: intent defaults to buy, matching Property.model.js.
+    const intent = String(row.intent || 'buy').trim().toLowerCase();
     if (!['rent', 'buy'].includes(intent)) {
       errors.push({ row: rowNum, name: row.projectName, reason: 'intent must be "rent" or "buy"' });
       continue;
@@ -157,6 +153,9 @@ exports.importProperties = asyncHandler(async (req, res) => {
         location: String(row.location).trim(),
         address: String(row.address || '').trim(),
         price: String(row.price || '').trim(),
+        sanction: String(row.sanction || '').trim(),
+        water: String(row.water || '').trim(),
+        floor: String(row.floor || '').trim(),
         amenities,
         parking: String(row.parking || '').trim(),
         notes: String(row.notes || '').trim(),
