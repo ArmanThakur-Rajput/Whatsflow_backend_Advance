@@ -1,12 +1,10 @@
 const cron = require('node-cron');
 const Lead = require('../models/Lead.model');
 const { startOfDay } = require('./dateRange');
+const { sendPendingRequestReminders } = require('../controllers/propertyRequests.controller');
 
-// Runs every day at midnight IST (18:30 UTC).
+// ── 1. New → Pending lead promoter — midnight IST (18:30 UTC) ─────────────────
 // Promotes all 'New' leads created on previous days to 'Pending'.
-// FIX #1: Added tenantId filter so only leads belonging to each tenant
-// are promoted — previously there was NO tenantId in the query which
-// would have mass-promoted New→Pending across ALL tenants in one shot.
 function startScheduler() {
   cron.schedule('30 18 * * *', async () => {
     try {
@@ -14,7 +12,7 @@ function startScheduler() {
         {
           status: 'New',
           createdAt: { $lt: startOfDay() },
-          tenantId: { $exists: true, $ne: null }, // scope to valid tenant docs only
+          tenantId: { $exists: true, $ne: null },
         },
         {
           $set: { status: 'Pending' },
@@ -33,7 +31,15 @@ function startScheduler() {
     }
   });
 
-  console.log('[Scheduler] midnight IST New→Pending cron registered');
+  // ── 2. Pending property-request daily reminder — 10:00 AM IST (04:30 UTC) ──
+  // Fires every day while a request_notif doc stays status=pending.
+  // Sends push + in-app notification to all admins of that tenant.
+  cron.schedule('30 4 * * *', async () => {
+    console.log('[Scheduler] Running pending property-request reminders…');
+    await sendPendingRequestReminders();
+  });
+
+  console.log('[Scheduler] All crons registered (midnight IST + 10 AM IST)');
 }
 
 module.exports = { startScheduler };
