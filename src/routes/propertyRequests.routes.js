@@ -5,7 +5,6 @@ const ctrl = require('../controllers/propertyRequests.controller');
 
 // Protect MongoDB reads and updates with the existing authenticated admin access.
 router.use(auth, adminOnly);
-router.get('/count', ctrl.countPropertyRequests);
 router.get('/', ctrl.listPropertyRequests);
 router.patch('/:requestId/complete', ctrl.completePropertyRequest);
 

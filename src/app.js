@@ -79,6 +79,7 @@ app.use('/api/custom-fields', require('./routes/customField.routes'));
 app.use('/api/super-admin', require('./routes/superAdmin.routes'));
 app.use('/api/property-crm', require('./routes/propertyCRM.routes'));
 app.use('/api/property-requests', require('./routes/propertyRequests.routes'));
+app.use('/api/riva', require('./routes/riva.routes'));
 
 
 app.get('/', (req, res) => {
