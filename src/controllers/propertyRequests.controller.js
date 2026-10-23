@@ -39,6 +39,23 @@ exports.listPropertyRequests = async (req, res, next) => {
   }
 };
 
+// GET /api/property-requests/count?status=pending
+// Count all matching requests without the list endpoint's pagination cap.
+exports.countPropertyRequests = async (req, res, next) => {
+  try {
+    const status = String(req.query.status || 'pending').trim().toLowerCase();
+    if (!['pending', 'complete', 'completed', 'all'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status filter' });
+    }
+
+    const filter = status === 'all' ? {} : { status };
+    const count = await getCollection().countDocuments(filter);
+    return res.json({ success: true, status, count });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // PATCH /api/property-requests/:requestId/complete
 exports.completePropertyRequest = async (req, res, next) => {
   try {
