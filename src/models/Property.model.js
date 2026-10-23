@@ -8,7 +8,7 @@ const propertySchema = new mongoose.Schema({
 
   // ── Required Fields ───────────────────────────────────────────────
   projectName:   { type: String, required: true, trim: true },       // Society/Project Name
-  propertyType:  { type: String, required: true, trim: true },       // Flat | Shop | Plot
+  propertyType:  { type: String, required: true, trim: true },       // 1RK | 1BHK | 2BHK | 3BHK | 4BHK+ | Bunglow | Plot | Commercial
   location:      { type: String, required: true, trim: true },
   price:         { type: String, required: true, trim: true },
   carpetArea:    { type: String, trim: true },
@@ -20,7 +20,7 @@ const propertySchema = new mongoose.Schema({
 
   // ── Optional Fields ───────────────────────────────────────────────
   intent:        { type: String, enum: ['rent', 'buy'], default: 'buy' },
-  flatConfig:    { type: String, trim: true },                        // 1RK, 1BHK, 2BHK etc
+  flatConfig:    { type: String, trim: true },                        // Legacy compatibility; new properties store configuration in propertyType
   buildingArea:  { type: String, trim: true },
   flatsOnFloor:  { type: String, trim: true },                        // How many flats on same floor
   lift:          { type: String, enum: ['Yes', 'No', ''], default: '' },

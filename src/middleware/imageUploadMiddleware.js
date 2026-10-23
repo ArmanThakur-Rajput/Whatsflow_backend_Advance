@@ -12,7 +12,7 @@ const fileFilter = (_req, file, cb) => {
   }
 };
 
-// No fileSize limit — admin can upload photos of any size
-const imageUpload = multer({ storage, fileFilter });
+// Keep uploads reliable on mobile networks and avoid unbounded memory usage.
+const imageUpload = multer({ storage, fileFilter, limits: { fileSize: 15 * 1024 * 1024, files: 10 } });
 
 module.exports = imageUpload;

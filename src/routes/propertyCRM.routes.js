@@ -24,6 +24,7 @@ router.get('/locations-summary', ctrl.getLocationsSummary);
 router.get('/types-summary', ctrl.getTypesSummary);
 
 // Properties CRUD
+router.get('/properties/export-csv', importCtrl.exportCSV);
 router.get('/properties', ctrl.getProperties);
 router.get('/properties/:id', ctrl.getPropertyById);
 router.post('/properties', ctrl.createProperty);

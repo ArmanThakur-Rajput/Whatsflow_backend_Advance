@@ -17,6 +17,11 @@ const R2_PUBLIC_URL = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, ''); // s
 
 // ─── Helper: upload file buffer to R2 ────────────────────────────────────────
 async function uploadBufferToR2(file) {
+  if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !R2_PUBLIC_URL) {
+    const err = new Error('Photo storage is not configured. Set R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_PUBLIC_URL.');
+    err.status = 503;
+    throw err;
+  }
   const ext = (file.mimetype.split('/')[1] || 'jpg').split('+')[0];
   const key = `properties/${crypto.randomUUID()}.${ext}`;
   await r2.send(new PutObjectCommand({
@@ -265,11 +270,12 @@ exports.uploadPhotos = async (req, res) => {
     }
 
     const urls = await Promise.all(files.map((f) => uploadBufferToR2(f)));
+    property.photos = Array.isArray(property.photos) ? property.photos : [];
     property.photos.push(...urls);
     await property.save();
     res.json({ success: true, photos: property.photos });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(err.status || 500).json({ success: false, message: err.message || 'Photo upload failed' });
   }
 };
 
@@ -602,50 +608,5 @@ exports.getGalleryPage = async (req, res) => {
   }
 };
 
-// ─── GET /api/property-crm/properties/export-csv ─────────────────────────────
-exports.exportCSV = async (req, res) => {
-  try {
-    const filter = {};
-    if (req.query.status) filter.status = req.query.status;
-    if (req.query.propertyType) filter.propertyType = req.query.propertyType;
-    if (req.query.location) filter.location = req.query.location;
-
-    const properties = await Property.find(filter).sort({ createdAt: -1 }).lean();
-
-    const escape = (val) => {
-      const str = val == null ? '' : String(val);
-      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
-
-    const headers = [
-      'Project Name', 'Type', 'Location', 'Price', 'Floor',
-      'Carpet Area', 'Buildup Area', 'Sanction', 'Parking', 'Water',
-      'Lift', 'Wings', 'Facing', 'Flats on Floor', 'Building Area',
-      'Amenities', 'Status', 'Owner Name', 'Owner Phone', 'Tenant Phone',
-      'GMaps Link', 'Notes', 'Created At',
-    ];
-
-    const rows = [headers.join(',')];
-    properties.forEach((p) => {
-      rows.push([
-        escape(p.projectName), escape(p.propertyType), escape(p.location),
-        escape(p.price), escape(p.floor), escape(p.carpetArea), escape(p.buildupArea),
-        escape(p.sanction), escape(p.parking), escape(p.water),
-        escape(p.lift), escape(p.wings), escape(p.facing), escape(p.flatsOnFloor),
-        escape(p.buildingArea), escape((p.amenities || []).join('; ')),
-        escape(p.status), escape(p.ownerName), escape(p.ownerPhone),
-        escape(p.tenantPhone), escape(p.gmapsLink), escape(p.notes),
-        escape(p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : ''),
-      ].join(','));
-    });
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="properties.csv"');
-    res.send(rows.join('\n'));
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
+// Export endpoint is implemented in propertyImport.controller.js so every export uses the same complete schema.
+exports.exportCSV = require('./propertyImport.controller').exportCSV;
