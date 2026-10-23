@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 // Master data for property dropdowns: locations, amenities, parking, property types
 const propertyMasterDataSchema = new mongoose.Schema({
-  tenantId: { type: String, required: true, index: true },
+  // Single-business app; tenantId retained only for compatibility with legacy documents.
+  tenantId: { type: String, index: false },
   category: {
     type: String,
     enum: ['location', 'amenity', 'parking', 'propertyType'],
@@ -12,7 +13,6 @@ const propertyMasterDataSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });
 
-propertyMasterDataSchema.index({ tenantId: 1, category: 1, isActive: 1 });
-propertyMasterDataSchema.index({ tenantId: 1, category: 1, value: 1 }, { unique: true });
+// Keep legacy tenant-based indexes in the database compatible; app queries are no longer tenant-filtered.
 
 module.exports = mongoose.model('PropertyMasterData', propertyMasterDataSchema);

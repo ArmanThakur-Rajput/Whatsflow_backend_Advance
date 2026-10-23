@@ -33,7 +33,7 @@ exports.downloadPropertyTemplate = asyncHandler(async (req, res) => {
 
 // POST /property-crm/import
 exports.importProperties = asyncHandler(async (req, res) => {
-  const { tenantId, name: adminName, _id: adminId } = req.user;
+  const { name: adminName, _id: adminId } = req.user;
 
   if (!req.file) {
     return res.status(400).json({ message: 'No file uploaded' });
@@ -124,9 +124,8 @@ exports.importProperties = asyncHandler(async (req, res) => {
       }
     }
 
-    // Duplicate check: same projectName + location + propertyType in this tenant
+    // Duplicate check: same projectName + location + propertyType across the single business
     const existing = await Property.findOne({
-      tenantId,
       projectName: { $regex: `^${row.projectName.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
       location: row.location.trim(),
       propertyType: row.propertyType.trim(),
@@ -148,7 +147,6 @@ exports.importProperties = asyncHandler(async (req, res) => {
 
     try {
       const prop = await Property.create({
-        tenantId,
         projectName: String(row.projectName).trim(),
         intent,
         propertyType: String(row.propertyType).trim(),
@@ -186,10 +184,9 @@ exports.importProperties = asyncHandler(async (req, res) => {
 
 // GET /property-crm/export  — export all properties as CSV
 exports.exportProperties = asyncHandler(async (req, res) => {
-  const { tenantId } = req.user;
   const { dateFrom, dateTo, status } = req.query;
 
-  const filter = { tenantId };
+  const filter = {};
   if (status) filter.status = status;
   if (dateFrom || dateTo) {
     filter.createdAt = {};

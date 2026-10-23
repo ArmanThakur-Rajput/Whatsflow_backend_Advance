@@ -1,7 +1,10 @@
 const mongoose = require('mongoose');
 
 const propertySchema = new mongoose.Schema({
-  tenantId: { type: String, required: true, index: true },
+  // Single-business app: tenantId is optional for legacy documents only.
+  tenantId: { type: String, index: false },
+  society: { type: String, trim: true },
+  sessionId: { type: String, trim: true },
 
   // ── Required Fields ───────────────────────────────────────────────
   projectName:   { type: String, required: true, trim: true },       // Society/Project Name
@@ -44,8 +47,8 @@ const propertySchema = new mongoose.Schema({
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
-propertySchema.index({ tenantId: 1, status: 1 });
-propertySchema.index({ tenantId: 1, location: 1 });
-propertySchema.index({ tenantId: 1, propertyType: 1 });
+propertySchema.index({ status: 1 });
+propertySchema.index({ location: 1 });
+propertySchema.index({ propertyType: 1 });
 
 module.exports = mongoose.model('Property', propertySchema);

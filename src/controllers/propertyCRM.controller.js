@@ -16,9 +16,9 @@ const R2_BUCKET = process.env.R2_BUCKET || 'whatsflow-properties';
 const R2_PUBLIC_URL = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, ''); // strip trailing slash
 
 // ─── Helper: upload file buffer to R2 ────────────────────────────────────────
-async function uploadBufferToR2(file, tenantId) {
+async function uploadBufferToR2(file) {
   const ext = (file.mimetype.split('/')[1] || 'jpg').split('+')[0];
-  const key = `properties/${tenantId}/${crypto.randomUUID()}.${ext}`;
+  const key = `properties/${crypto.randomUUID()}.${ext}`;
   await r2.send(new PutObjectCommand({
     Bucket: R2_BUCKET,
     Key: key,
@@ -51,9 +51,8 @@ async function deleteImageFromR2(url) {
 
 exports.getMasterData = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
     const { category } = req.query;
-    const filter = { tenantId, isActive: true };
+    const filter = { isActive: true };
     if (category) filter.category = category;
     const items = await PropertyMasterData.find(filter).sort({ value: 1 }).lean();
     res.json({ success: true, items });
@@ -64,11 +63,10 @@ exports.getMasterData = async (req, res) => {
 
 exports.addMasterData = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
     const { category, value } = req.body;
     if (!category || !value) return res.status(400).json({ success: false, message: 'category and value required' });
     const item = await PropertyMasterData.findOneAndUpdate(
-      { tenantId, category, value },
+      { category, value },
       { isActive: true },
       { upsert: true, new: true }
     );
@@ -80,8 +78,7 @@ exports.addMasterData = async (req, res) => {
 
 exports.deleteMasterData = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    await PropertyMasterData.findOneAndUpdate({ _id: req.params.id, tenantId }, { isActive: false });
+    await PropertyMasterData.findByIdAndUpdate(req.params.id, { isActive: false });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -92,11 +89,10 @@ exports.deleteMasterData = async (req, res) => {
 
 exports.getStats = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
     const [total, available, sold] = await Promise.all([
-      Property.countDocuments({ tenantId }),
-      Property.countDocuments({ tenantId, status: 'available' }),
-      Property.countDocuments({ tenantId, status: { $in: ['sold', 'rented'] } }),
+      Property.countDocuments({}),
+      Property.countDocuments({ status: 'available' }),
+      Property.countDocuments({ status: { $in: ['sold', 'rented'] } }),
     ]);
     res.json({ success: true, total, available, sold });
   } catch (err) {
@@ -108,9 +104,8 @@ exports.getStats = async (req, res) => {
 
 exports.getLocationsSummary = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
     const agg = await Property.aggregate([
-      { $match: { tenantId } },
+      { $match: {} },
       { $group: {
         _id: '$location',
         total: { $sum: 1 },
@@ -128,8 +123,7 @@ exports.getLocationsSummary = async (req, res) => {
 
 exports.getTypesSummary = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    const filter = { tenantId };
+    const filter = {};
     if (req.query.location) filter.location = req.query.location;
     const agg = await Property.aggregate([
       { $match: filter },
@@ -152,14 +146,19 @@ exports.getTypesSummary = async (req, res) => {
 
 exports.getProperties = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    const filter = { tenantId };
+    const filter = {};
     if (req.query.location) filter.location = req.query.location;
     if (req.query.propertyType) filter.propertyType = req.query.propertyType;
     if (req.query.flatConfig) filter.flatConfig = req.query.flatConfig;
     if (req.query.status) filter.status = req.query.status;
     const properties = await Property.find(filter).sort({ createdAt: -1 }).lean();
-    res.json({ success: true, properties });
+    const normalizedProperties = properties.map((p) => ({
+      ...p,
+      projectName: p.projectName || p.society || '',
+      status: p.status === 'complete' || !p.status ? 'available' : p.status,
+      flatConfig: p.flatConfig || p.bhk || '',
+    }));
+    res.json({ success: true, properties: normalizedProperties });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -167,10 +166,15 @@ exports.getProperties = async (req, res) => {
 
 exports.getPropertyById = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    const property = await Property.findOne({ _id: req.params.id, tenantId }).lean();
+    const property = await Property.findById(req.params.id).lean();
     if (!property) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, property });
+    const normalizedProperty = {
+      ...property,
+      projectName: property.projectName || property.society || '',
+      status: property.status === 'complete' || !property.status ? 'available' : property.status,
+      flatConfig: property.flatConfig || property.bhk || '',
+    };
+    res.json({ success: true, property: normalizedProperty });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -178,7 +182,6 @@ exports.getPropertyById = async (req, res) => {
 
 exports.createProperty = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
     const {
       projectName, intent, propertyType, flatConfig, carpetArea, buildupArea,
       plotArea, buildingArea, flatsOnFloor, lift, wings, facing,
@@ -189,7 +192,7 @@ exports.createProperty = async (req, res) => {
       return res.status(400).json({ success: false, message: 'projectName, propertyType, location, price, sanction, parking, water, floor are required' });
     }
     const property = await Property.create({
-      tenantId, projectName, intent: intent || 'buy', propertyType, flatConfig,
+      projectName, intent: intent || 'buy', propertyType, flatConfig,
       carpetArea, buildupArea, plotArea, buildingArea, flatsOnFloor, lift, wings, facing,
       location, address, price, sanction, parking, water, floor,
       amenities: amenities || [], notes, ownerName, ownerPhone, tenantPhone, gmapsLink,
@@ -203,9 +206,8 @@ exports.createProperty = async (req, res) => {
 
 exports.updateProperty = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    const property = await Property.findOneAndUpdate(
-      { _id: req.params.id, tenantId },
+    const property = await Property.findByIdAndUpdate(
+      req.params.id,
       { $set: req.body },
       { new: true, runValidators: true }
     );
@@ -218,8 +220,7 @@ exports.updateProperty = async (req, res) => {
 
 exports.deleteProperty = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    const property = await Property.findOne({ _id: req.params.id, tenantId });
+    const property = await Property.findById(req.params.id);
     if (!property) return res.status(404).json({ success: false, message: 'Not found' });
     // Delete all photos from R2 first
     if (property.photos?.length) {
@@ -234,15 +235,14 @@ exports.deleteProperty = async (req, res) => {
 
 exports.setPropertyStatus = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
     const { status } = req.body;
     if (!['available', 'sold', 'rented'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
     const update = { status };
     if (status !== 'available') update.soldOrRentedAt = new Date();
-    const property = await Property.findOneAndUpdate(
-      { _id: req.params.id, tenantId },
+    const property = await Property.findByIdAndUpdate(
+      req.params.id,
       update,
       { new: true }
     );
@@ -256,8 +256,7 @@ exports.setPropertyStatus = async (req, res) => {
 // POST /api/property-crm/properties/:id/photos
 exports.uploadPhotos = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    const property = await Property.findOne({ _id: req.params.id, tenantId });
+    const property = await Property.findById(req.params.id);
     if (!property) return res.status(404).json({ success: false, message: 'Not found' });
 
     const files = req.files;
@@ -265,7 +264,7 @@ exports.uploadPhotos = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No photos provided' });
     }
 
-    const urls = await Promise.all(files.map((f) => uploadBufferToR2(f, tenantId)));
+    const urls = await Promise.all(files.map((f) => uploadBufferToR2(f)));
     property.photos.push(...urls);
     await property.save();
     res.json({ success: true, photos: property.photos });
@@ -278,12 +277,11 @@ exports.uploadPhotos = async (req, res) => {
 // Body: { url: '...' }
 exports.deletePhoto = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
     // Support both JSON body and query param as fallback
     const url = req.body?.url || req.query?.url;
     if (!url) return res.status(400).json({ success: false, message: 'url is required' });
 
-    const property = await Property.findOne({ _id: req.params.id, tenantId });
+    const property = await Property.findById(req.params.id);
     if (!property) return res.status(404).json({ success: false, message: 'Not found' });
 
     // Only delete from R2 if URL actually exists in this property's photos
@@ -607,8 +605,7 @@ exports.getGalleryPage = async (req, res) => {
 // ─── GET /api/property-crm/properties/export-csv ─────────────────────────────
 exports.exportCSV = async (req, res) => {
   try {
-    const tenantId = req.user.tenantId?.toString();
-    const filter = { tenantId };
+    const filter = {};
     if (req.query.status) filter.status = req.query.status;
     if (req.query.propertyType) filter.propertyType = req.query.propertyType;
     if (req.query.location) filter.location = req.query.location;
