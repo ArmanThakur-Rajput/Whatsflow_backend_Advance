@@ -31,6 +31,9 @@ const propertySchema = new mongoose.Schema({
   address:       { type: String, trim: true },
   notes:         { type: String, trim: true },
 
+  // ── Furnishing ────────────────────────────────────────────────────
+  furnishing:    { type: String, enum: ['Unfurnished', 'Semi-Furnished', 'Full Furnished', ''], default: '' },
+
   // ── Owner / Tenant Details (optional) ────────────────────────────
   ownerName:     { type: String, trim: true },
   ownerPhone:    { type: String, trim: true },
