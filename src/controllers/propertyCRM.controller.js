@@ -264,10 +264,23 @@ exports.uploadPhotos = async (req, res) => {
       return res.status(400).json({ success: false, message: 'No photos provided' });
     }
 
+    // Upload images to R2, then update ONLY the photos field in MongoDB.
+    // Do not call property.save(): it validates every required/enum field on
+    // the document and can reject photo uploads when legacy property fields
+    // contain values that no longer match the current schema.
     const urls = await Promise.all(files.map((f) => uploadBufferToR2(f)));
-    property.photos.push(...urls);
-    await property.save();
-    res.json({ success: true, photos: property.photos });
+
+    const updatedProperty = await Property.findByIdAndUpdate(
+      req.params.id,
+      { $push: { photos: { $each: urls } } },
+      { new: true, projection: { photos: 1 } }
+    );
+
+    if (!updatedProperty) {
+      return res.status(404).json({ success: false, message: 'Not found' });
+    }
+
+    res.json({ success: true, photos: updatedProperty.photos });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
