@@ -6,8 +6,9 @@ const imageUpload = require('../middleware/imageUploadMiddleware');
 const ctrl = require('../controllers/propertyCRM.controller');
 const importCtrl = require('../controllers/propertyImport.controller');
 
-// Public — no auth (shared via WhatsApp)
-router.get('/properties/:id/gallery', ctrl.getGalleryPage);
+// Public — no auth (shared via WhatsApp / token)
+router.get('/properties/:id/gallery', ctrl.getGalleryPage); // legacy
+router.get('/share/:token', ctrl.getGalleryPage);           // 24-hr token link
 
 router.use(auth, adminOnly);
 
@@ -30,6 +31,9 @@ router.post('/properties', ctrl.createProperty);
 router.patch('/properties/:id', ctrl.updateProperty);
 router.delete('/properties/:id', ctrl.deleteProperty);        // ← Property delete (new)
 router.patch('/properties/:id/status', ctrl.setPropertyStatus);
+
+// Share link (24 hrs)
+router.post('/properties/:id/share-link', ctrl.createShareLink);
 
 // Photos
 router.post('/properties/:id/photos', imageUpload.array('photos', 10), ctrl.uploadPhotos);

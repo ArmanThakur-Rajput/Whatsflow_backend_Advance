@@ -184,18 +184,30 @@ exports.createProperty = async (req, res) => {
   try {
     const {
       projectName, intent, propertyType, flatConfig, carpetArea, buildupArea,
-      plotArea, buildingArea, flatsOnFloor, lift, wings, facing,
+      plotArea, buildingArea, totalFloors, flatsOnFloor, lift, wings, facing,
       location, address, price, sanction, parking, water, floor,
       amenities, notes, ownerName, ownerPhone, tenantPhone, gmapsLink,
+      furnishing, maintenance,
+      // new fields
+      listingType, nearbyLocalities,
+      monthlyRent, securityDeposit,
+      propertyAge, possession, possessionDate,
+      documents,
     } = req.body;
     if (!projectName || !propertyType || !location || !price || !sanction || !parking || !water || !floor) {
       return res.status(400).json({ success: false, message: 'projectName, propertyType, location, price, sanction, parking, water, floor are required' });
     }
     const property = await Property.create({
       projectName, intent: intent || 'buy', propertyType, flatConfig,
-      carpetArea, buildupArea, plotArea, buildingArea, flatsOnFloor, lift, wings, facing,
+      carpetArea, buildupArea, plotArea, buildingArea, totalFloors, flatsOnFloor,
+      lift, wings, facing,
       location, address, price, sanction, parking, water, floor,
       amenities: amenities || [], notes, ownerName, ownerPhone, tenantPhone, gmapsLink,
+      furnishing, maintenance,
+      listingType: listingType || 'Sale',
+      nearbyLocalities, monthlyRent, securityDeposit,
+      propertyAge, possession, possessionDate,
+      documents: documents || [],
       createdBy: req.user._id,
     });
     res.status(201).json({ success: true, property });
@@ -312,310 +324,473 @@ exports.deletePhoto = async (req, res) => {
 };
 
 // GET /api/property-crm/properties/:id/gallery  (public — no auth)
+// POST /api/property-crm/properties/:id/share-link
+// Generates (or refreshes) a 24-hour share token and returns the public URL.
+exports.createShareLink = async (req, res) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
+    const token = crypto.randomBytes(20).toString('hex');
+    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hrs
+    property.shareToken = token;
+    property.shareTokenExpiry = expiry;
+    await property.save();
+    const BASE = (process.env.BACKEND_URL || process.env.APP_URL || '').replace(/\/$/, '');
+    const url = `${BASE}/api/property-crm/share/${token}`;
+    res.json({ success: true, url, expiresAt: expiry });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// GET /api/property-crm/share/:token  — public, no auth, full property details page
+// Also keeps backward-compat: GET /api/property-crm/properties/:id/gallery
 exports.getGalleryPage = async (req, res) => {
   try {
-    const property = await Property.findById(req.params.id).select('projectName photos location propertyType price status intent');
-    if (!property) return res.status(404).send('Property not found');
-
-    if (!property.photos?.length) {
-      return res.send(`<!DOCTYPE html>
-<html><head>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${property.projectName}</title>
-  <style>body{margin:0;background:#0f0f0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;}</style>
-</head><body><div><div style="font-size:48px">🏠</div><p>No photos uploaded yet</p></div></body></html>`);
+    let property;
+    // Route can be called with token (/share/:token) or legacy id (:id/gallery)
+    if (req.params.token) {
+      property = await Property.findOne({
+        shareToken: req.params.token,
+        shareTokenExpiry: { $gt: new Date() },
+      });
+      if (!property) {
+        return res.status(410).send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>body{margin:0;background:#0f0f0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;}</style></head><body><div><div style="font-size:52px">⏰</div><h2 style="margin:16px 0 8px">Link Expired</h2><p style="color:#9ca3af">This property link was valid for 24 hours and has expired.<br>Ask the agent to send you a fresh link.</p></div></body></html>`);
+      }
+    } else {
+      property = await Property.findById(req.params.id);
+      if (!property) return res.status(404).send('Property not found');
     }
 
-    const statusColor = property.status === 'available' ? '#22c55e' : property.status === 'sold' ? '#ef4444' : '#f59e0b';
-    const statusLabel = property.status === 'available' ? 'Available' : property.status === 'sold' ? 'Sold' : 'Rented';
-    const intentLabel = property.intent === 'buy' ? 'For Sale' : 'For Rent';
+    const p = property.toObject ? property.toObject() : property;
+    const photos = (p.photos || []).filter(Boolean);
+    const isRent = p.listingType === 'Rent';
 
-    // First photo is hero, rest go in grid
-    const [heroPhoto, ...gridPhotos] = property.photos;
+    function fmt(n) {
+      if (!n) return '';
+      const num = parseFloat(String(n).replace(/,/g, ''));
+      if (isNaN(num) || num === 0) return n;
+      if (num >= 10000000) return `₹${(num/10000000).toFixed(2).replace(/\.?0+$/,'')} Cr`;
+      if (num >= 100000) return `₹${(num/100000).toFixed(2).replace(/\.?0+$/,'')} L`;
+      return `₹${num.toLocaleString('en-IN')}`;
+    }
 
-    const heroTag = `<div class="hero-wrap"><img class="hero-img" src="${heroPhoto}" alt="${property.projectName}" loading="eager" data-index="0"><div class="hero-badge">${property.photos.length} Photos</div></div>`;
+    function row(icon, label, value) {
+      if (!value) return '';
+      return `<div class="drow"><span class="dicon">${icon}</span><div><div class="dlabel">${label}</div><div class="dval">${value}</div></div></div>`;
+    }
 
-    const gridTags = gridPhotos.map((url, i) => `
-      <div class="thumb-wrap">
-        <img src="${url}" alt="${property.projectName}" loading="lazy" data-index="${i + 1}">
-      </div>`).join('');
+    function chips(arr) {
+      if (!arr || !arr.length) return '';
+      return arr.map(a => `<span class="chip">${a}</span>`).join('');
+    }
 
-    res.setHeader('Content-Security-Policy',
-      "default-src 'none'; img-src *; style-src 'unsafe-inline'; script-src 'unsafe-inline';"
-    );
+    const priceDisplay = isRent
+      ? (p.monthlyRent ? `₹${Number(String(p.monthlyRent).replace(/,/g,'') || 0).toLocaleString('en-IN')}/mo` : fmt(p.price))
+      : fmt(p.price);
 
+    const statusColor = p.status === 'available' ? '#22c55e' : p.status === 'sold' ? '#ef4444' : '#f59e0b';
+    const statusLabel = p.status === 'available' ? 'Available' : p.status === 'sold' ? 'Sold' : 'Rented';
+
+    const photosHTML = photos.length ? `
+      <div class="photo-hero" id="hero" onclick="openLb(0)">
+        <img id="heroImg" src="${photos[0]}" alt="${p.projectName}" loading="eager">
+        <div class="photo-count">📷 ${photos.length} photo${photos.length > 1 ? 's' : ''}</div>
+        <div class="hero-overlay">Tap to view all</div>
+      </div>
+      ${photos.length > 1 ? `<div class="thumb-row">${photos.slice(1,5).map((u,i) => `<div class="thumb" onclick="openLb(${i+1})"><img src="${u}" loading="lazy"><div class="thumb-overlay">${i === 3 && photos.length > 5 ? `+${photos.length-5}` : ''}</div></div>`).join('')}</div>` : ''}
+    ` : `<div class="no-photo">🏠<p>No photos yet</p></div>`;
+
+    const lbPhotos = JSON.stringify(photos);
+
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src *; style-src 'unsafe-inline'; script-src 'unsafe-inline';");
     res.send(`<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta charset="utf-8">
-  <title>${property.projectName} — Photos</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>${p.projectName} — KIN Property</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0f0f0f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; min-height: 100vh; }
-
-    /* ── Header ── */
-    .header {
-      background: linear-gradient(160deg, #1a1a2e 0%, #16213e 60%, #0f3460 100%);
-      padding: 20px 16px 20px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
+    :root {
+      --gold: #D4AF37;
+      --gold2: #F5D76E;
+      --dark: #0a0a0a;
+      --card: #141414;
+      --card2: #1c1c1c;
+      --border: rgba(255,255,255,0.08);
+      --text: #f1f1f1;
+      --muted: #9ca3af;
+      --green: #22c55e;
     }
-    .brand { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px; }
-    .title { font-size: 24px; font-weight: 800; color: #fff; line-height: 1.2; margin-bottom: 6px; }
-    .meta-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
-    .badge {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
-    }
-    .badge-status { background: ${statusColor}22; color: ${statusColor}; border: 1px solid ${statusColor}44; }
-    .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: ${statusColor}; }
-    .badge-type { background: rgba(255,255,255,0.08); color: #d1d5db; }
-    .badge-intent { background: rgba(99,102,241,0.15); color: #a5b4fc; }
-    .price { font-size: 22px; font-weight: 800; color: #ffffff; margin-top: 10px; }
-    .location { font-size: 13px; color: #9ca3af; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+    html { scroll-behavior: smooth; }
+    body { background: var(--dark); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
 
-    /* ── Hero ── */
-    .hero-wrap { position: relative; width: 100%; aspect-ratio: 16/9; max-height: 320px; overflow: hidden; cursor: pointer; }
-    .hero-img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.3s ease; }
-    .hero-wrap:active .hero-img { transform: scale(0.98); }
-    .hero-badge {
-      position: absolute; bottom: 12px; right: 12px;
-      background: rgba(0,0,0,0.7); backdrop-filter: blur(8px);
+    /* ── Brand Header ── */
+    .brand-header {
+      background: linear-gradient(135deg, #0a0a0a 0%, #1a1200 50%, #0a0a0a 100%);
+      border-bottom: 1px solid rgba(212,175,55,0.3);
+      padding: 20px 16px 16px;
+      text-align: center;
+    }
+    .brand-logo {
+      font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+      color: var(--gold); font-weight: 700; margin-bottom: 4px; opacity: 0.8;
+    }
+    .brand-name {
+      font-size: 26px; font-weight: 900; letter-spacing: 2px;
+      background: linear-gradient(135deg, var(--gold) 0%, var(--gold2) 50%, var(--gold) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .brand-tagline {
+      font-size: 11px; color: rgba(212,175,55,0.6); letter-spacing: 1.5px; margin-top: 4px;
+    }
+
+    /* ── Photos ── */
+    .photo-hero {
+      position: relative; width: 100%; aspect-ratio: 4/3; max-height: 300px;
+      overflow: hidden; cursor: pointer; background: #111;
+    }
+    .photo-hero img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.4s; }
+    .photo-hero:active img { transform: scale(0.98); }
+    .photo-count {
+      position: absolute; bottom: 10px; right: 10px;
+      background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
       color: #fff; font-size: 12px; font-weight: 600;
       padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.15);
     }
-    .tap-hint {
+    .hero-overlay {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       background: rgba(0,0,0,0); transition: background 0.2s;
-      pointer-events: none;
+      color: #fff; font-size: 14px; font-weight: 600; opacity: 0;
+      transition: opacity 0.2s;
     }
-    .tap-hint-icon {
-      background: rgba(0,0,0,0.5); border-radius: 50%; width: 48px; height: 48px;
+    .photo-hero:hover .hero-overlay { opacity: 1; background: rgba(0,0,0,0.3); }
+    .thumb-row {
+      display: grid; grid-template-columns: repeat(4,1fr); gap: 2px;
+      background: #000; border-top: 2px solid var(--dark);
+    }
+    .thumb { position: relative; aspect-ratio: 1; overflow: hidden; cursor: pointer; background: #111; }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.2s; }
+    .thumb:active img { transform: scale(0.95); }
+    .thumb-overlay {
+      position: absolute; inset: 0; background: rgba(0,0,0,0.5);
       display: flex; align-items: center; justify-content: center;
-      opacity: 0; transition: opacity 0.2s;
-      font-size: 20px;
+      color: #fff; font-size: 18px; font-weight: 800;
     }
-    .hero-wrap:hover .tap-hint { background: rgba(0,0,0,0.2); }
-    .hero-wrap:hover .tap-hint-icon { opacity: 1; }
+    .no-photo {
+      padding: 40px; text-align: center; background: var(--card); color: var(--muted);
+      font-size: 32px;
+    }
+    .no-photo p { font-size: 14px; margin-top: 8px; }
 
-    /* ── Grid ── */
-    .section-label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 1.5px; padding: 16px 16px 8px; font-weight: 600; }
-    .grid { padding: 0 12px 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-    @media(min-width: 500px) { .grid { grid-template-columns: repeat(4, 1fr); } }
-    .thumb-wrap { aspect-ratio: 1; overflow: hidden; border-radius: 8px; background: #1a1a1a; cursor: pointer; }
-    .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.2s, opacity 0.2s; }
-    .thumb-wrap:active img { transform: scale(0.95); opacity: 0.8; }
+    /* ── Body ── */
+    .body { padding: 0 14px 80px; max-width: 640px; margin: 0 auto; }
+
+    /* ── Property Title Block ── */
+    .title-block { padding: 20px 0 16px; border-bottom: 1px solid var(--border); }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
+    }
+    .badge-status { background: ${statusColor}18; color: ${statusColor}; border: 1px solid ${statusColor}30; }
+    .badge-listing { background: rgba(212,175,55,0.12); color: var(--gold); border: 1px solid rgba(212,175,55,0.3); }
+    .badge-type { background: rgba(255,255,255,0.06); color: #d1d5db; border: 1px solid var(--border); }
+    .prop-title { font-size: 22px; font-weight: 900; color: var(--text); line-height: 1.25; margin-bottom: 6px; }
+    .prop-location { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 5px; margin-bottom: 14px; }
+
+    /* ── Price Block ── */
+    .price-block {
+      background: linear-gradient(135deg, #141400 0%, #1c1900 100%);
+      border: 1px solid rgba(212,175,55,0.2);
+      border-radius: 14px; padding: 16px; margin: 16px 0;
+    }
+    .price-label { font-size: 11px; color: rgba(212,175,55,0.7); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+    .price-value { font-size: 28px; font-weight: 900; color: var(--gold); line-height: 1; }
+    .price-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .price-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+    .price-item { background: rgba(255,255,255,0.05); border-radius: 10px; padding: 8px 12px; flex: 1; min-width: 120px; }
+    .price-item-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .price-item-val { font-size: 15px; font-weight: 700; color: var(--text); margin-top: 2px; }
+
+    /* ── Section ── */
+    .section { margin: 20px 0; }
+    .section-title {
+      font-size: 11px; color: var(--gold); text-transform: uppercase; letter-spacing: 2px;
+      font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
+    }
+    .section-title::after { content: ''; flex: 1; height: 1px; background: rgba(212,175,55,0.2); }
+
+    /* ── Detail Rows ── */
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    @media(max-width: 360px) { .detail-grid { grid-template-columns: 1fr; } }
+    .drow {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px 14px;
+      display: flex; align-items: flex-start; gap: 10px;
+    }
+    .drow.full { grid-column: 1/-1; }
+    .dicon { font-size: 18px; margin-top: 1px; flex-shrink: 0; }
+    .dlabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .dval { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.3; }
+
+    /* ── Chip list ── */
+    .chip-list { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip {
+      background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+      border-radius: 20px; padding: 5px 12px;
+      font-size: 12px; color: var(--text); font-weight: 500;
+    }
+    .chip.gold { background: rgba(212,175,55,0.1); border-color: rgba(212,175,55,0.25); color: var(--gold); }
+
+    /* ── Possession banner ── */
+    .possession-banner {
+      background: linear-gradient(135deg, rgba(34,197,94,0.1), rgba(34,197,94,0.05));
+      border: 1px solid rgba(34,197,94,0.2);
+      border-radius: 12px; padding: 14px 16px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .possession-icon { font-size: 24px; }
+    .possession-title { font-size: 13px; font-weight: 700; color: var(--green); }
+    .possession-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .possession-uc {
+      background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(245,158,11,0.05));
+      border-color: rgba(245,158,11,0.2);
+    }
+    .possession-uc .possession-title { color: #f59e0b; }
+
+    /* ── Docs ── */
+    .doc-item {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 14px;
+      font-size: 13px; color: var(--text); font-weight: 500;
+    }
+
+    /* ── Footer CTA ── */
+    .footer {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(to top, rgba(10,10,10,1) 70%, transparent);
+      padding: 16px 14px 20px;
+    }
+    .cta-btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      background: linear-gradient(135deg, #25D366, #128C7E);
+      color: #fff; font-size: 15px; font-weight: 800;
+      border: none; border-radius: 14px; padding: 16px;
+      width: 100%; text-decoration: none; cursor: pointer;
+      letter-spacing: 0.3px;
+    }
+
+    /* ── Expiry notice ── */
+    .expiry-bar {
+      background: rgba(212,175,55,0.08); border-top: 1px solid rgba(212,175,55,0.15);
+      padding: 8px 14px; text-align: center;
+      font-size: 11px; color: rgba(212,175,55,0.6);
+    }
 
     /* ── Lightbox ── */
     #lb {
       display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.97);
-      z-index: 999;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      touch-action: pan-y pinch-zoom;
+      background: rgba(0,0,0,0.97); z-index: 999;
+      flex-direction: column; align-items: center; justify-content: center;
+      touch-action: pan-y;
     }
     #lb.open { display: flex; }
-
-    .lb-topbar {
+    .lb-bar {
       position: fixed; top: 0; left: 0; right: 0;
-      padding: 14px 16px;
-      display: flex; align-items: center; justify-content: space-between;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
-      z-index: 10;
+      padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent); z-index: 10;
     }
-    .lb-counter { font-size: 14px; color: #d1d5db; font-weight: 600; }
     .lb-close {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer; font-size: 18px; color: #fff;
-      transition: background 0.2s;
-    }
-    .lb-close:hover { background: rgba(255,255,255,0.25); }
-
-    .lb-img-wrap { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 60px 0; }
-    #lb-img { max-width: 96vw; max-height: 80vh; object-fit: contain; border-radius: 8px; user-select: none; -webkit-user-drag: none; }
-
-    .lb-nav {
-      position: fixed; top: 50%; transform: translateY(-50%);
-      width: 40px; height: 40px; border-radius: 50%;
+      width: 38px; height: 38px; border-radius: 50%;
       background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
       display: flex; align-items: center; justify-content: center;
       cursor: pointer; font-size: 18px; color: #fff;
-      transition: background 0.2s; z-index: 10;
     }
-    .lb-nav:hover { background: rgba(255,255,255,0.25); }
-    #lb-prev { left: 10px; }
-    #lb-next { right: 10px; }
-
-    /* Thumbnails strip at bottom */
-    .lb-thumbs {
-      position: fixed; bottom: 0; left: 0; right: 0;
-      padding: 12px 12px 20px;
-      background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
-      display: flex; gap: 6px; overflow-x: auto; justify-content: center;
-      scrollbar-width: none;
+    .lb-counter { color: #d1d5db; font-weight: 600; font-size: 14px; }
+    #lb-img { max-width: 96vw; max-height: 80vh; object-fit: contain; border-radius: 8px; user-select: none; }
+    .lb-nav {
+      position: fixed; top: 50%; transform: translateY(-50%);
+      width: 42px; height: 42px; border-radius: 50%;
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: 20px; color: #fff; z-index: 10;
     }
-    .lb-thumbs::-webkit-scrollbar { display: none; }
-    .lb-thumb {
-      width: 48px; height: 48px; flex-shrink: 0; border-radius: 6px; overflow: hidden;
-      border: 2px solid transparent; cursor: pointer; transition: border-color 0.2s, opacity 0.2s;
-      opacity: 0.5;
-    }
-    .lb-thumb.active { border-color: #6366f1; opacity: 1; }
-    .lb-thumb img { width: 100%; height: 100%; object-fit: cover; }
-
-    /* ── Footer ── */
-    .footer { text-align: center; padding: 28px 16px 40px; color: #374151; font-size: 12px; }
-    .footer span { color: #6366f1; }
+    #lb-prev { left: 8px; } #lb-next { right: 8px; }
   </style>
 </head>
 <body>
-
-  <!-- Header -->
-  <div class="header">
-    <div class="brand">🏢 <span style="color:#ffffff">Kin Property</span> <span style="color:#f5c518">Management</span></div>
-    <div class="title">${property.projectName}</div>
-    ${property.location ? `<div class="location">📍 ${property.location}</div>` : ''}
-    <div class="meta-row">
-      ${property.propertyType ? `<span class="badge badge-type">${property.propertyType}</span>` : ''}
-    </div>
-    ${property.price ? `<div class="price" id="price-display">₹ ${property.price}</div>` : ''}
+  <!-- Brand Header -->
+  <div class="brand-header">
+    <div class="brand-logo">Real Estate</div>
+    <div class="brand-name">KIN PROPERTY</div>
+    <div class="brand-tagline">YOUR PROPERTY, OUR TRUST</div>
   </div>
 
-  <!-- Hero Photo -->
-  ${heroTag}
+  <!-- Photos -->
+  ${photosHTML}
 
-  <!-- Grid -->
-  ${gridPhotos.length > 0 ? `<div class="section-label">All Photos</div><div class="grid">${gridTags}</div>` : ''}
+  <div class="body">
+    <!-- Title Block -->
+    <div class="title-block">
+      <div class="badges">
+        <span class="badge badge-status">● ${statusLabel}</span>
+        <span class="badge badge-listing">${p.listingType || 'Sale'}</span>
+        ${p.propertyType ? `<span class="badge badge-type">${p.propertyType}</span>` : ''}
+        ${p.flatConfig ? `<span class="badge badge-type">${p.flatConfig}</span>` : ''}
+      </div>
+      <div class="prop-title">${p.projectName}</div>
+      <div class="prop-location">📍 ${p.location}</div>
+      ${p.nearbyLocalities ? `<div style="color:#6b7280;font-size:12px;margin-top:-8px;margin-bottom:8px">Near: ${p.nearbyLocalities}</div>` : ''}
+    </div>
+
+    <!-- Price Block -->
+    <div class="price-block">
+      <div class="price-label">${isRent ? 'Monthly Rent' : 'Sale Price'}</div>
+      <div class="price-value">${priceDisplay || '—'}</div>
+      ${p.maintenance ? `<div class="price-sub">+ ₹${p.maintenance}/mo maintenance</div>` : ''}
+      ${isRent && (p.securityDeposit || p.monthlyRent) ? `
+      <div class="price-row">
+        ${p.monthlyRent ? `<div class="price-item"><div class="price-item-label">Monthly Rent</div><div class="price-item-val">₹${Number(String(p.monthlyRent).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
+        ${p.securityDeposit ? `<div class="price-item"><div class="price-item-label">Security Deposit</div><div class="price-item-val">₹${Number(String(p.securityDeposit).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
+      </div>` : ''}
+    </div>
+
+    <!-- Possession -->
+    ${p.possession ? `
+    <div class="section">
+      <div class="${p.possession === 'Ready to Move' ? 'possession-banner' : 'possession-banner possession-uc'}">
+        <div class="possession-icon">${p.possession === 'Ready to Move' ? '✅' : '🏗️'}</div>
+        <div>
+          <div class="possession-title">${p.possession}</div>
+          ${p.possessionDate ? `<div class="possession-sub">Expected: ${p.possessionDate}</div>` : ''}
+        </div>
+      </div>
+    </div>` : ''}
+
+    <!-- Key Details -->
+    <div class="section">
+      <div class="section-title">Property Details</div>
+      <div class="detail-grid">
+        ${row('🏠', 'Property Type', p.propertyType)}
+        ${row('📐', 'Carpet Area', p.carpetArea)}
+        ${row('📏', 'Buildup Area', p.buildupArea)}
+        ${row('🏢', 'Floor', p.floor)}
+        ${row('🏗️', 'Total Floors', p.totalFloors)}
+        ${row('🧭', 'Facing', p.facing)}
+        ${row('🛗', 'Lift', p.lift)}
+        ${row('🚗', 'Parking', p.parking)}
+        ${row('💧', 'Water Source', p.water)}
+        ${row('✅', 'Sanction', p.sanction)}
+        ${row('🏡', 'Furnishing', p.furnishing)}
+        ${row('📅', 'Property Age', p.propertyAge)}
+        ${p.wings ? row('🏘️', 'Wings', p.wings) : ''}
+        ${p.flatsOnFloor ? row('🔢', 'Flats on Floor', p.flatsOnFloor) : ''}
+      </div>
+    </div>
+
+    <!-- Amenities -->
+    ${p.amenities && p.amenities.length ? `
+    <div class="section">
+      <div class="section-title">Amenities</div>
+      <div class="chip-list">
+        ${p.amenities.map(a => `<span class="chip gold">✦ ${a}</span>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- Documents Available -->
+    ${p.documents && p.documents.length ? `
+    <div class="section">
+      <div class="section-title">Documents Available</div>
+      <div style="display:flex;flex-direction:column;gap:7px;">
+        ${p.documents.map(d => `<div class="doc-item">📄 ${d}</div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- Notes -->
+    ${p.notes ? `
+    <div class="section">
+      <div class="section-title">Additional Info</div>
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;font-size:14px;color:var(--muted);line-height:1.6;">${p.notes}</div>
+    </div>` : ''}
+
+    <!-- Map Link -->
+    ${p.gmapsLink ? `
+    <div class="section">
+      <a href="${p.gmapsLink}" target="_blank" style="display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid rgba(66,133,244,0.3);border-radius:12px;padding:14px 16px;text-decoration:none;color:var(--text);">
+        <span style="font-size:22px">🗺️</span>
+        <div><div style="font-size:13px;font-weight:700;color:#60a5fa;">View on Google Maps</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Tap to open in Maps app</div></div>
+        <span style="margin-left:auto;color:#60a5fa;">→</span>
+      </a>
+    </div>` : ''}
+
+  </div><!-- /body -->
+
+  <!-- Footer CTA -->
+  <div class="footer">
+    ${p.ownerPhone
+      ? `<a class="cta-btn" href="https://wa.me/91${p.ownerPhone.replace(/\D/g,'')}?text=${encodeURIComponent(`Hi, I'm interested in the property at ${p.projectName}, ${p.location}. Can you share more details?`)}">
+          <span style="font-size:20px">💬</span> Contact on WhatsApp
+        </a>`
+      : `<div style="text-align:center;color:var(--muted);font-size:13px;">Contact your agent for more info</div>`}
+  </div>
+
+  <!-- Expiry bar -->
+  ${req.params.token ? `<div class="expiry-bar" style="padding-bottom:80px;">🔗 This link expires in 24 hours</div>` : ''}
 
   <!-- Lightbox -->
   <div id="lb">
-    <div class="lb-topbar">
-      <span class="lb-counter" id="lb-counter">1 / ${property.photos.length}</span>
-      <div class="lb-close" id="lb-close">✕</div>
+    <div class="lb-bar">
+      <div class="lb-close" onclick="closeLb()">✕</div>
+      <div class="lb-counter" id="lbCount">1 / ${photos.length}</div>
+      <div style="width:38px"></div>
     </div>
-    <div class="lb-img-wrap">
-      <img id="lb-img" src="" alt="">
-    </div>
-    <div class="lb-nav" id="lb-prev">‹</div>
-    <div class="lb-nav" id="lb-next">›</div>
-    <div class="lb-thumbs" id="lb-thumbs"></div>
+    <img id="lb-img" src="" alt="">
+    ${photos.length > 1 ? `<div class="lb-nav" id="lb-prev" onclick="navLb(-1)">‹</div><div class="lb-nav" id="lb-next" onclick="navLb(1)">›</div>` : ''}
   </div>
 
   <script>
-    // Format price
-    function formatPrice(raw) {
-      if (!raw) return '';
-      if (raw.includes('(')) return raw; // already formatted
-      var num = parseFloat(raw.replace(/,/g, ''));
-      if (isNaN(num) || num === 0) return raw;
-      var short = '';
-      if (num >= 10000000) short = (num / 10000000).toFixed(2).replace(/\\.?0+$/, '') + ' Cr';
-      else if (num >= 100000) short = (num / 100000).toFixed(2).replace(/\\.?0+$/, '') + ' L';
-      else if (num >= 1000) short = (num / 1000).toFixed(1).replace(/\\.?0+$/, '') + 'k';
-      return short ? raw + ' (' + short + ')' : raw;
-    }
-    var priceEl = document.getElementById('price-display');
-    if (priceEl) {
-      var raw = '${property.price || ''}';
-      if (raw) priceEl.textContent = '₹ ' + formatPrice(raw);
-    }
-
-    var photos = ${JSON.stringify(property.photos)};
-    var current = 0;
-    var lb = document.getElementById('lb');
-    var lbImg = document.getElementById('lb-img');
-    var lbCounter = document.getElementById('lb-counter');
-    var lbThumbs = document.getElementById('lb-thumbs');
-
-    // Build thumbnail strip
-    photos.forEach(function(url, i) {
-      var t = document.createElement('div');
-      t.className = 'lb-thumb' + (i === 0 ? ' active' : '');
-      t.innerHTML = '<img src="' + url + '" loading="lazy">';
-      t.addEventListener('click', function() { goTo(i); });
-      lbThumbs.appendChild(t);
-    });
-
-    function goTo(index) {
-      current = (index + photos.length) % photos.length;
-      lbImg.src = photos[current];
-      lbCounter.textContent = (current + 1) + ' / ' + photos.length;
-      document.querySelectorAll('.lb-thumb').forEach(function(t, i) {
-        t.classList.toggle('active', i === current);
-      });
-      // Scroll thumb into view
-      var thumbs = document.querySelectorAll('.lb-thumb');
-      if (thumbs[current]) thumbs[current].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    }
-
-    function openLightbox(index) {
-      lb.classList.add('open');
+    const photos = ${lbPhotos};
+    let cur = 0;
+    function openLb(i) {
+      cur = i; document.getElementById('lb-img').src = photos[i];
+      document.getElementById('lbCount').textContent = (i+1) + ' / ' + photos.length;
+      document.getElementById('lb').classList.add('open');
       document.body.style.overflow = 'hidden';
-      goTo(index);
     }
-
-    function closeLightbox() {
-      lb.classList.remove('open');
+    function closeLb() {
+      document.getElementById('lb').classList.remove('open');
       document.body.style.overflow = '';
     }
-
-    // Click on hero
-    document.querySelector('.hero-img').addEventListener('click', function() {
-      openLightbox(parseInt(this.dataset.index));
+    function navLb(d) {
+      cur = (cur + d + photos.length) % photos.length;
+      document.getElementById('lb-img').src = photos[cur];
+      document.getElementById('lbCount').textContent = (cur+1) + ' / ' + photos.length;
+    }
+    document.getElementById('lb').addEventListener('click', function(e) {
+      if (e.target === this) closeLb();
     });
-
-    // Click on grid thumbs
-    document.querySelectorAll('.thumb-wrap img').forEach(function(img) {
-      img.addEventListener('click', function() {
-        openLightbox(parseInt(this.dataset.index));
-      });
+    // Swipe
+    let sx = 0;
+    document.getElementById('lb').addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive: true });
+    document.getElementById('lb').addEventListener('touchend', e => {
+      const dx = e.changedTouches[0].clientX - sx;
+      if (Math.abs(dx) > 50 && photos.length > 1) navLb(dx < 0 ? 1 : -1);
     });
-
-    document.getElementById('lb-close').addEventListener('click', closeLightbox);
-    document.getElementById('lb-prev').addEventListener('click', function() { goTo(current - 1); });
-    document.getElementById('lb-next').addEventListener('click', function() { goTo(current + 1); });
-
-    // Click outside image closes
-    lb.addEventListener('click', function(e) {
-      if (e.target === lb || e.target.classList.contains('lb-img-wrap')) closeLightbox();
-    });
-
-    // Keyboard navigation
-    document.addEventListener('keydown', function(e) {
-      if (!lb.classList.contains('open')) return;
-      if (e.key === 'ArrowRight') goTo(current + 1);
-      if (e.key === 'ArrowLeft') goTo(current - 1);
-      if (e.key === 'Escape') closeLightbox();
-    });
-
-    // Touch swipe support
-    var touchStartX = 0;
-    var touchStartY = 0;
-    lbImg.addEventListener('touchstart', function(e) {
-      touchStartX = e.touches[0].clientX;
-      touchStartY = e.touches[0].clientY;
-    }, { passive: true });
-    lbImg.addEventListener('touchend', function(e) {
-      var dx = e.changedTouches[0].clientX - touchStartX;
-      var dy = e.changedTouches[0].clientY - touchStartY;
-      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-        if (dx < 0) goTo(current + 1);
-        else goTo(current - 1);
-      }
-    }, { passive: true });
   </script>
 </body>
 </html>`);
   } catch (err) {
-    res.status(500).send('Error loading gallery');
+    console.error('[getGalleryPage]', err);
+    res.status(500).send('Something went wrong loading this property page.');
   }
 };
 
-// ─── GET /api/property-crm/properties/export-csv ─────────────────────────────
+
 exports.exportCSV = async (req, res) => {
   try {
     const filter = {};
