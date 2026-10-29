@@ -323,9 +323,8 @@ exports.deletePhoto = async (req, res) => {
   }
 };
 
-// GET /api/property-crm/properties/:id/gallery  (public — no auth)
 // POST /api/property-crm/properties/:id/share-link
-// Generates (or refreshes) a 24-hour share token and returns the public URL.
+// Generates (or refreshes) a 48-hour share token and returns the public URL.
 exports.createShareLink = async (req, res) => {
   try {
     const property = await Property.findById(req.params.id);
@@ -345,6 +344,8 @@ exports.createShareLink = async (req, res) => {
 
 // GET /api/property-crm/share/:token  — public, no auth, full property details page
 // Also keeps backward-compat: GET /api/property-crm/properties/:id/gallery
+const AGENT_PHONE = '7498366577'; // 10-digit, bina +91
+
 exports.getGalleryPage = async (req, res) => {
   try {
     let property;
@@ -354,7 +355,7 @@ exports.getGalleryPage = async (req, res) => {
         shareTokenExpiry: { $gt: new Date() },
       });
       if (!property) {
-        return res.status(410).send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0d1117;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.card{background:#161b22;border:1px solid #30363d;border-radius:20px;padding:48px 36px;text-align:center;max-width:380px;width:90%}.icon{font-size:56px;margin-bottom:20px}.title{font-size:22px;font-weight:800;color:#e6edf3;margin-bottom:10px}.sub{font-size:14px;color:#8b949e;line-height:1.6}</style></head><body><div class="card"><div class="icon">⏰</div><div class="title">Link Expired</div><div class="sub">This property link was valid for 48 hours and has expired.<br><br>Ask the agent to send you a fresh link.</div></div></body></html>`);
+        return res.status(410).send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#f3f6fd;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.card{background:#fff;border-radius:20px;padding:48px 36px;text-align:center;max-width:380px;width:90%;box-shadow:0 6px 30px rgba(15,30,80,.08)}.icon{font-size:56px;margin-bottom:20px}.title{font-size:22px;font-weight:800;color:#0e1a3a;margin-bottom:10px}.sub{font-size:14px;color:#6b7690;line-height:1.6}</style></head><body><div class="card"><div class="icon">⏰</div><div class="title">Link Expired</div><div class="sub">This property link was valid for 48 hours and has expired.<br><br>Ask the agent to send you a fresh link.</div></div></body></html>`);
       }
     } else {
       property = await Property.findById(req.params.id);
@@ -365,581 +366,295 @@ exports.getGalleryPage = async (req, res) => {
     const photos = (p.photos || []).filter(Boolean);
     const isRent = p.listingType === 'Rent';
 
-    function fmt(n) {
-      if (!n) return '';
-      const num = parseFloat(String(n).replace(/,/g, ''));
-      if (isNaN(num) || num === 0) return String(n);
-      if (num >= 10000000) return `₹${(num/10000000).toFixed(2).replace(/\.?0+$/,'')} Cr`;
-      if (num >= 100000)   return `₹${(num/100000).toFixed(2).replace(/\.?0+$/,'')} L`;
-      return `₹${num.toLocaleString('en-IN')}`;
-    }
-
-    const SVG_ICONS = {
-      home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>`,
-      carpet: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>`,
-      buildup: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20M5 20V8l7-5 7 5v12"/><path d="M10 20v-5h4v5"/></svg>`,
-      floors: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18M3 13h18M3 18h18"/></svg>`,
-      facing: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="2.5"/></svg>`,
-      lift: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 10l3-3 3 3M9 14l3 3 3-3"/></svg>`,
-      parking: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 17V7h4a3 3 0 010 6H9"/></svg>`,
-      water: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C6 9 4 13 4 16a8 8 0 0016 0c0-3-2-7-8-14z"/></svg>`,
-      sanction: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>`,
-      furnishing: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V6a1 1 0 011-1h16a1 1 0 011 1v3"/><path d="M3 9a2 2 0 00-2 2v6h22v-6a2 2 0 00-2-2H3z"/><path d="M5 17v2M19 17v2"/></svg>`,
-      age: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
-      flats: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><path d="M12 12v3M10 14h4"/></svg>`,
-      type: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+    // ── helpers ──────────────────────────────────────────────────────────────
+    const esc = (v) => String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const num = (v) => {
+      const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.]/g, ''));
+      return isNaN(n) ? 0 : n;
     };
-    function card(iconKey, label, value) {
-      if (!value) return '';
-      const svg = SVG_ICONS[iconKey] || SVG_ICONS.type;
-      return `<div class="dc"><div class="dc-icon">${svg}</div><div class="dc-label">${label}</div><div class="dc-val">${value}</div></div>`;
+    const fmtPrice = (v) => {
+      const n = num(v);
+      if (!n) return v ? esc(v) : '';
+      const trim = (x) => x.toFixed(2).replace(/\.?0+$/, '');
+      if (n >= 10000000) return '₹' + trim(n / 10000000) + ' Cr';
+      if (n >= 100000) return '₹' + trim(n / 100000) + ' Lakh';
+      return '₹' + n.toLocaleString('en-IN');
+    };
+    const sqft = (v) => {
+      if (!v) return '';
+      const s = String(v).trim();
+      return /[a-z]/i.test(s) ? esc(s) : esc(s) + ' sq.ft';
+    };
+
+    const priceMain = isRent
+      ? (p.monthlyRent ? '₹' + num(p.monthlyRent).toLocaleString('en-IN') + '/mo' : fmtPrice(p.price))
+      : fmtPrice(p.price);
+
+    let perSqft = '';
+    if (!isRent && num(p.price) && num(p.buildupArea)) {
+      perSqft = '₹' + Math.round(num(p.price) / num(p.buildupArea)).toLocaleString('en-IN') + ' per sq.ft (Approx.)';
     }
 
-    const priceDisplay = isRent
-      ? (p.monthlyRent ? `₹${Number(String(p.monthlyRent).replace(/,/g,'')||0).toLocaleString('en-IN')}/mo` : fmt(p.price))
-      : fmt(p.price);
+    // ── Detail tiles (icon emoji + pastel colour) ────────────────────────────
+    const details = [
+      ['🏠', '#e6f0ff', 'Type', esc(p.flatConfig || p.propertyType)],
+      ['📐', '#e3f7ea', 'Carpet Area', sqft(p.carpetArea)],
+      ['📏', '#fff0dc', 'Built-up Area', sqft(p.buildupArea)],
+      ['🏢', '#efe6ff', 'Total Floors', esc(p.totalFloors)],
+      ['🧭', '#fff0dc', 'Facing', esc(p.facing)],
+      ['🛗', '#efe6ff', 'Lift', esc(p.lift)],
+      ['🅿️', '#ffe6ec', 'Parking', esc(p.parking)],
+      ['💧', '#e3f7ea', 'Water Supply', esc(p.water)],
+      ['🏬', '#fff6d6', 'Flats / Floor', esc(p.flatsOnFloor)],
+      ['🛋️', '#efe6ff', 'Furnishing', esc(p.furnishing)],
+      ['🗓️', '#fff0dc', 'Property Age', esc(p.propertyAge)],
+      ['🔑', '#ffe6ec', 'Possession', esc(p.possession)],
+      ['📜', '#e6f0ff', 'Sanction', esc(p.sanction)],
+      ['🧱', '#e3f7ea', 'Floor', esc(p.floor)],
+    ].filter((d) => d[3]);
 
-    const statusColor  = p.status === 'available' ? '#22c55e' : p.status === 'sold' ? '#ef4444' : '#f59e0b';
-    const statusBg     = p.status === 'available' ? '#052e16' : p.status === 'sold' ? '#450a0a' : '#431407';
-    const statusLabel  = p.status === 'available' ? 'Available' : p.status === 'sold' ? 'Sold' : 'Rented';
+    const detailsHTML = details.map((d) =>
+      `<div class="dt"><div class="dt-ic" style="background:${d[1]}">${d[0]}</div><div class="dt-tx"><div class="dt-l">${d[2]}</div><div class="dt-v">${d[3]}</div></div></div>`
+    ).join('');
 
-    // ── Photo gallery HTML ───────────────────────────────────────────────────
-    const cameraSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>`;
-    const expandSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>`;
-    const buildingSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="48" height="48"><rect x="2" y="7" width="20" height="15" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="12.01"/></svg>`;
+    // ── Amenities (keyword → emoji + tint) ───────────────────────────────────
+    const AM = [
+      [/pool|swim/i, '🏊', '#e3f2ff'], [/gym|fitness/i, '🏋️', '#e3f7ea'],
+      [/club/i, '🏡', '#efe6ff'], [/backup|power|generator/i, '⚡', '#fff6d6'],
+      [/cctv|camera|surveil/i, '📹', '#ffe6ec'], [/secur|guard/i, '🛡️', '#e3f2ff'],
+      [/garden|park\b|green/i, '🌿', '#e3f7ea'], [/kid|play|child/i, '🎠', '#ffe6ec'],
+      [/visitor/i, '🚗', '#fff0dc'], [/lift|elevator/i, '🛗', '#efe6ff'],
+      [/parking/i, '🅿️', '#fff0dc'], [/water/i, '💧', '#e3f2ff'],
+      [/garbage|waste/i, '♻️', '#e3f7ea'], [/temple|pooja/i, '🛕', '#fff0dc'],
+      [/jog|track/i, '🏃', '#e3f7ea'], [/court|sport|tennis|badminton/i, '🏸', '#e3f2ff'],
+    ];
+    const amenitiesHTML = (p.amenities || []).map((a) => {
+      const m = AM.find((x) => x[0].test(a));
+      return `<div class="am" style="background:${m ? m[2] : '#eef2fb'}"><div class="am-ic">${m ? m[1] : '✔️'}</div><div class="am-l">${esc(a)}</div></div>`;
+    }).join('');
+
+    // ── Gallery ──────────────────────────────────────────────────────────────
+    const thumbsShown = photos.slice(0, 5);
+    const extra = photos.length - 5;
+    const thumbsHTML = thumbsShown.map((u, i) => {
+      const more = i === 4 && extra > 0;
+      return `<div class="th${i === 0 ? ' on' : ''}" data-i="${i}"><img src="${esc(u)}" alt="" loading="lazy">${more ? `<div class="th-more">+${extra}</div>` : ''}</div>`;
+    }).join('');
+
     const galleryHTML = photos.length ? `
-      <div class="gallery">
-        <div class="gallery-hero" onclick="openLb(0)">
-          <img src="${photos[0]}" alt="Property photo" loading="eager">
-          <div class="gallery-overlay">${expandSVG}<span>View all photos</span></div>
-          <div class="gallery-badge">${cameraSVG}<span>${photos.length} photo${photos.length > 1 ? 's' : ''}</span></div>
-        </div>
-        ${photos.length > 1 ? `
-        <div class="gallery-thumbs">
-          ${photos.slice(1, 5).map((u, i) => `
-            <div class="gallery-thumb" onclick="openLb(${i+1})">
-              <img src="${u}" loading="lazy">
-              ${i === 3 && photos.length > 5 ? `<div class="gallery-thumb-more">+${photos.length - 5}</div>` : ''}
-            </div>`).join('')}
-        </div>` : ''}
-      </div>` : `
-      <div class="no-photo">
-        <div class="no-photo-icon">${buildingSVG}</div>
-        <p>No photos available</p>
-      </div>`;
+      <div class="hero" id="hero">
+        <img id="hero-img" src="${esc(photos[0])}" alt="Property photo">
+        <div class="cnt" id="cnt">1 / ${photos.length}</div>
+        ${photos.length > 1 ? `<button class="ar l" id="prev" aria-label="Previous">&#8249;</button><button class="ar r" id="next" aria-label="Next">&#8250;</button>` : ''}
+      </div>
+      ${photos.length > 1 ? `<div class="thumbs">${thumbsHTML}</div>` : ''}`
+      : `<div class="hero nophoto"><div>🏢<br><span>No photos available</span></div></div>`;
 
-    const lbPhotos = JSON.stringify(photos);
+    const waText = encodeURIComponent(`Hi, I'm interested in "${p.projectName || p.society || 'your property'}"${p.location ? ' at ' + p.location : ''}. Can you share more details?`);
+    const waLink = `https://wa.me/91${AGENT_PHONE}?text=${waText}`;
+    const telLink = `tel:+91${AGENT_PHONE}`;
+    const statusLabel = p.status === 'sold' ? 'Sold' : p.status === 'rented' ? 'Rented' : '';
 
-    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src *; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src 'none';");
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src * data:; style-src 'unsafe-inline' https://fonts.googleapis.com; script-src 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src 'none';");
     res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0b1220">
-  <title>KIN Property Management</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <style>
-    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    :root{
-      --bg:#f4f6f9;
-      --surface:#ffffff;
-      --border:#e8eaee;
-      --navy:#0b1220;
-      --navy2:#162033;
-      --navy3:#1e2d45;
-      --gold:#b8892e;
-      --gold2:#d4a84b;
-      --gold-light:#fdf6e8;
-      --gold-mid:#f5e6c3;
-      --text:#0f1923;
-      --text2:#374151;
-      --muted:#6b7280;
-      --muted2:#9ca3af;
-      --green:#15803d;
-      --wa:#25d366;
-      --radius:14px;
-      --radius-sm:10px;
-      --shadow:0 1px 2px rgba(0,0,0,.04),0 3px 12px rgba(0,0,0,.05);
-      --shadow-md:0 4px 20px rgba(0,0,0,.08);
-      --shadow-lg:0 8px 40px rgba(0,0,0,.12);
-    }
-    html{scroll-behavior:smooth;-webkit-tap-highlight-color:transparent}
-    body{
-      background:var(--bg);color:var(--text);
-      font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-      min-height:100vh;line-height:1.5;padding-bottom:110px;
-    }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1530">
+<title>${esc(p.projectName || 'Property')} | Kin Property Management</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--navy:#0b1530;--gold:#f5c542;--blue:#1457f5;--bg:#f3f6fd;--ink:#0e1a3a;--mute:#6b7690;--line:#e6ebf5}
+html{-webkit-tap-highlight-color:transparent}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);line-height:1.4;padding-bottom:110px}
+.wrap{max-width:560px;margin:0 auto}
 
-    /* ── Header ── */
-    .header{
-      background:var(--navy);
-      padding-top:env(safe-area-inset-top,0);
-      position:relative;overflow:hidden;
-    }
-    .header::after{
-      content:'';position:absolute;inset:0;
-      background:radial-gradient(ellipse 80% 60% at 50% 120%,rgba(184,137,46,.14) 0%,transparent 70%);
-      pointer-events:none;
-    }
-    .header-strip{
-      height:3px;
-      background:linear-gradient(90deg,transparent 0%,var(--gold) 30%,var(--gold2) 50%,var(--gold) 70%,transparent 100%);
-    }
-    .header-body{
-      max-width:720px;margin:0 auto;
-      padding:28px 20px 26px;
-      display:flex;flex-direction:column;align-items:center;
-      position:relative;z-index:1;
-    }
-    .header-badge{
-      display:inline-flex;align-items:center;gap:7px;
-      background:rgba(184,137,46,.12);border:1px solid rgba(184,137,46,.25);
-      border-radius:999px;padding:5px 14px;margin-bottom:14px;
-    }
-    .header-badge-dot{width:5px;height:5px;border-radius:50%;background:var(--gold2);flex-shrink:0}
-    .header-badge-text{font-size:10px;font-weight:700;color:var(--gold2);letter-spacing:1.8px;text-transform:uppercase}
-    .header-name{
-      font-size:clamp(22px,5vw,30px);font-weight:900;
-      color:#ffffff;letter-spacing:-.3px;line-height:1.1;
-      text-align:center;
-    }
-    .header-name span{color:var(--gold2)}
-    .header-sub{
-      font-size:12px;font-weight:500;color:rgba(255,255,255,.4);
-      margin-top:7px;letter-spacing:.6px;
-    }
-    .header-divider{
-      width:48px;height:2px;margin:16px auto 0;
-      background:linear-gradient(90deg,transparent,var(--gold2),transparent);
-      border-radius:2px;
-    }
+/* header */
+.top{background:var(--navy);padding:calc(env(safe-area-inset-top,0px) + 16px) 16px 14px;text-align:center}
+.top h1{font-size:19px;font-weight:700;color:#fff;letter-spacing:-.2px}
+.top h1 b{color:var(--gold);font-weight:700}
 
-    /* ── Gallery ── */
-    .gallery{max-width:720px;margin:20px auto 0;padding:0 16px}
-    .gallery-hero{
-      position:relative;border-radius:var(--radius);overflow:hidden;
-      aspect-ratio:4/3;cursor:pointer;background:#d9dde5;
-      box-shadow:var(--shadow-lg);
-    }
-    @media(min-width:500px){.gallery-hero{aspect-ratio:16/9}}
-    .gallery-hero img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s cubic-bezier(.25,.46,.45,.94)}
-    .gallery-hero:hover img,.gallery-hero:active img{transform:scale(1.04)}
-    .gallery-overlay{
-      position:absolute;inset:0;display:flex;flex-direction:column;
-      align-items:center;justify-content:center;gap:8px;
-      background:rgba(11,18,32,0);color:#fff;font-size:13px;font-weight:600;
-      opacity:0;transition:all .3s ease;letter-spacing:.3px;
-    }
-    .gallery-overlay svg{stroke:#fff;width:22px;height:22px}
-    .gallery-hero:hover .gallery-overlay,.gallery-hero:active .gallery-overlay{opacity:1;background:rgba(11,18,32,.45)}
-    .gallery-badge{
-      position:absolute;bottom:12px;right:12px;
-      background:rgba(11,18,32,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
-      color:#fff;font-size:11px;font-weight:600;padding:6px 12px;border-radius:8px;
-      display:flex;align-items:center;gap:5px;letter-spacing:.2px;
-      border:1px solid rgba(255,255,255,.08);
-    }
-    .gallery-badge svg{stroke:#fff;flex-shrink:0}
-    .gallery-thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:6px}
-    .gallery-thumb{
-      position:relative;aspect-ratio:1;border-radius:var(--radius-sm);overflow:hidden;
-      cursor:pointer;background:#d9dde5;
-    }
-    .gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .25s ease}
-    .gallery-thumb:hover img,.gallery-thumb:active img{transform:scale(1.07)}
-    .gallery-thumb-more{
-      position:absolute;inset:0;
-      background:rgba(11,18,32,.65);backdrop-filter:blur(2px);
-      display:flex;align-items:center;justify-content:center;
-      color:#fff;font-size:15px;font-weight:700;letter-spacing:-.3px;
-    }
-    .no-photo{
-      max-width:720px;margin:20px auto 0;padding:52px 24px;text-align:center;
-      background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius);
-    }
-    .no-photo-icon{margin-bottom:12px;display:flex;justify-content:center}
-    .no-photo-icon svg{stroke:#c4c9d4}
-    .no-photo p{color:var(--muted2);font-size:13px;font-weight:500}
+/* gallery */
+.gal{padding:10px 10px 0}
+.hero{position:relative;border-radius:22px;overflow:hidden;aspect-ratio:16/9.6;background:#d7dde9;touch-action:pan-y}
+.hero img{width:100%;height:100%;object-fit:cover;display:block}
+.hero.nophoto{display:flex;align-items:center;justify-content:center;text-align:center;font-size:44px;color:#9aa6bf}
+.hero.nophoto span{font-size:13px;font-weight:600}
+.cnt{position:absolute;top:14px;right:14px;background:rgba(20,26,45,.62);color:#fff;font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.ar{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:0;background:#fff;color:var(--ink);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;padding-bottom:4px}
+.ar.l{left:12px}.ar.r{right:12px}
+.thumbs{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-top:10px}
+.th{position:relative;aspect-ratio:1/.85;border-radius:12px;overflow:hidden;cursor:pointer;background:#d7dde9;border:2px solid transparent}
+.th.on{border-color:var(--blue);box-shadow:0 0 0 2px rgba(20,87,245,.18)}
+.th img{width:100%;height:100%;object-fit:cover;display:block}
+.th-more{position:absolute;inset:0;background:rgba(20,26,45,.6);color:#fff;font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center}
 
-    /* ── Property title block ── */
-    .prop-title-block{
-      max-width:720px;margin:20px auto 0;padding:0 16px;
-    }
-    .prop-title{font-size:clamp(20px,4.5vw,26px);font-weight:900;color:var(--text);line-height:1.2;letter-spacing:-.3px}
-    .prop-addr{font-size:13px;color:var(--muted);margin-top:5px;font-weight:500}
+/* title */
+.title{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 14px 0}
+.title h2{font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.15}
+.pill{background:#e9eef9;color:var(--ink);font-weight:600;font-size:14px;padding:9px 16px;border-radius:999px;white-space:nowrap}
+.addr{padding:6px 14px 0;font-size:13px;color:var(--mute);font-weight:500}
+.stat{margin:10px 14px 0;display:inline-block;background:#ffe9e9;color:#c62828;font-weight:700;font-size:12px;padding:5px 12px;border-radius:999px}
 
-    /* ── Main content ── */
-    .content{max-width:720px;margin:0 auto;padding:16px 16px 0}
+/* price */
+.price{margin:14px 10px 0;border-radius:20px;padding:16px 20px 16px;background:linear-gradient(120deg,#e6edfb 0%,#dfe8fb 55%,#e9effc 100%)}
+.price .l{font-size:14px;font-weight:600;color:#56627f}
+.price .v{font-size:36px;font-weight:800;letter-spacing:-1px;margin-top:2px}
+.price .s{font-size:15px;color:#6b7690;margin-top:4px;font-weight:500}
+.price .dep{display:flex;gap:10px;margin-top:12px}
+.price .dep div{flex:1;background:rgba(255,255,255,.65);border-radius:12px;padding:10px 12px}
+.price .dep small{display:block;font-size:11px;color:var(--mute);font-weight:600}
+.price .dep b{font-size:16px;font-weight:800}
 
-    /* Status + listing row */
-    .tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
-    .tag{
-      display:inline-flex;align-items:center;gap:4px;
-      padding:5px 12px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.3px;
-    }
-    .tag-status{background:${statusBg};color:${statusColor};border:1px solid ${statusColor}35}
-    .tag-listing{background:#1a1200;color:#d4a017;border:1px solid rgba(212,160,23,.25)}
-    .tag-type{background:#f0f2f5;color:var(--text2);border:1px solid var(--border)}
+/* cards */
+.card{background:#fff;border-radius:20px;margin:12px 10px 0;padding:14px 12px 14px;box-shadow:0 2px 14px rgba(20,40,100,.05)}
+.card h3{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:700;margin:0 4px 12px}
+.card h3 i{font-style:normal;width:34px;height:34px;border-radius:10px;background:#fff1de;display:flex;align-items:center;justify-content:center;font-size:18px}
+.dgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.dt{background:#f8faff;border:1px solid var(--line);border-radius:14px;padding:10px 8px;display:flex;align-items:center;gap:8px;min-width:0}
+.dt-ic{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.dt-tx{min-width:0}
+.dt-l{font-size:11.5px;color:var(--mute);font-weight:500}
+.dt-v{font-size:13.5px;font-weight:700;line-height:1.2;overflow-wrap:anywhere}
+.agrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.am{border-radius:12px;padding:12px 6px 10px;text-align:center;min-width:0}
+.am-ic{font-size:24px;line-height:1.1}
+.am-l{font-size:12.5px;font-weight:500;margin-top:6px;overflow-wrap:anywhere}
+.docs{display:flex;flex-direction:column;gap:7px}
+.doc{background:#f8faff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:13.5px;font-weight:600}
+.notes{font-size:14px;color:#374151;line-height:1.7;padding:0 4px;white-space:pre-line}
+.exp{text-align:center;font-size:12px;color:var(--mute);font-weight:500;margin:14px 10px 0}
 
-    /* Location card */
-    .loc-card{
-      background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
-      padding:16px 18px;margin-bottom:10px;display:flex;align-items:center;gap:14px;
-      box-shadow:var(--shadow);
-    }
-    .loc-icon{
-      width:42px;height:42px;border-radius:11px;
-      background:linear-gradient(135deg,var(--navy2),var(--navy3));
-      display:flex;align-items:center;justify-content:center;flex-shrink:0;
-    }
-    .loc-icon svg{stroke:#fff}
-    .loc-name{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}
-    .loc-nearby{font-size:12px;color:var(--muted);margin-top:2px;font-weight:500}
+/* contact bar */
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:40;background:linear-gradient(to top,#fff 70%,rgba(255,255,255,0));padding:18px 14px max(14px,env(safe-area-inset-bottom,14px))}
+.cta{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;max-width:560px;margin:0 auto;border:0;border-radius:16px;background:var(--blue);color:#fff;font:700 18px 'Inter',sans-serif;padding:19px 20px;box-shadow:0 8px 22px rgba(20,87,245,.32);cursor:pointer}
+.cta svg{width:24px;height:24px;fill:#fff}
+.cta:active{transform:scale(.985)}
 
-    /* Price card */
-    .price-card{
-      background:linear-gradient(135deg,var(--navy) 0%,var(--navy3) 100%);
-      border-radius:var(--radius);padding:22px 22px 20px;margin-bottom:10px;
-      position:relative;overflow:hidden;box-shadow:var(--shadow-lg);
-      border:1px solid rgba(184,137,46,.15);
-    }
-    .price-card::before{
-      content:'';position:absolute;right:-30px;top:-30px;
-      width:160px;height:160px;border-radius:50%;
-      background:radial-gradient(circle,rgba(184,137,46,.12) 0%,transparent 70%);
-      pointer-events:none;
-    }
-    .price-eyebrow{font-size:10px;color:rgba(255,255,255,.45);letter-spacing:1.8px;margin-bottom:8px;font-weight:600;text-transform:uppercase}
-    .price-main{font-size:clamp(28px,6vw,38px);font-weight:900;color:#ffffff;line-height:1;position:relative;z-index:1;letter-spacing:-.5px}
-    .price-main-accent{color:var(--gold2)}
-    .price-sub{font-size:12px;color:rgba(255,255,255,.4);margin-top:8px;font-weight:500}
-    .price-pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
-    .price-pill{
-      background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
-      border-radius:10px;padding:10px 14px;flex:1;min-width:120px;
-    }
-    .price-pill-label{font-size:9px;color:rgba(255,255,255,.4);letter-spacing:1px;font-weight:600;text-transform:uppercase}
-    .price-pill-val{font-size:15px;font-weight:800;color:#e8edf5;margin-top:4px}
-
-    /* Possession banner */
-    .poss-banner{
-      border-radius:var(--radius);padding:14px 18px;margin-bottom:10px;
-      display:flex;align-items:center;gap:14px;
-      box-shadow:var(--shadow);
-    }
-    .poss-banner.rtm{background:#071d10;border:1px solid rgba(22,163,74,.3)}
-    .poss-banner.uc{background:#1c0f04;border:1px solid rgba(245,158,11,.3)}
-    .poss-icon{flex-shrink:0;display:flex;align-items:center;justify-content:center}
-    .poss-banner.rtm .poss-icon svg{stroke:#4ade80}
-    .poss-banner.uc .poss-icon svg{stroke:#fbbf24}
-    .poss-title{font-size:14px;font-weight:700}
-    .poss-banner.rtm .poss-title{color:#4ade80}
-    .poss-banner.uc .poss-title{color:#fbbf24}
-    .poss-sub{font-size:12px;color:rgba(255,255,255,.4);margin-top:2px;font-weight:500}
-
-    /* Section */
-    .section{margin-bottom:10px}
-    .section-head{
-      display:flex;align-items:center;gap:10px;margin-bottom:10px;padding:0 2px;
-    }
-    .section-head-label{
-      font-size:10px;font-weight:700;color:var(--muted);
-      letter-spacing:1.6px;white-space:nowrap;text-transform:uppercase;
-    }
-    .section-head-line{flex:1;height:1px;background:var(--border)}
-
-    /* Detail cards grid */
-    .dc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
-    @media(min-width:480px){.dc-grid{grid-template-columns:repeat(3,1fr)}}
-    .dc{
-      background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
-      padding:14px;display:flex;flex-direction:column;gap:8px;
-      box-shadow:var(--shadow);
-    }
-    .dc-icon{
-      width:30px;height:30px;border-radius:8px;
-      background:var(--gold-light);border:1px solid var(--gold-mid);
-      display:flex;align-items:center;justify-content:center;flex-shrink:0;
-    }
-    .dc-icon svg{width:14px;height:14px;stroke:var(--gold)}
-    .dc-label{font-size:9px;font-weight:700;color:var(--muted2);letter-spacing:.8px;text-transform:uppercase}
-    .dc-val{font-size:13px;font-weight:700;color:var(--text);line-height:1.3;overflow-wrap:anywhere}
-
-    /* Amenities */
-    .amenity-list{display:flex;flex-wrap:wrap;gap:6px}
-    .amenity-chip{
-      background:var(--surface);border:1px solid var(--border);border-radius:8px;
-      padding:7px 12px;font-size:12px;font-weight:600;color:var(--text2);
-      display:flex;align-items:center;gap:5px;
-    }
-    .amenity-check{stroke:var(--gold);flex-shrink:0}
-
-    /* Documents */
-    .doc-list{display:flex;flex-direction:column;gap:6px}
-    .doc-item{
-      background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
-      padding:12px 15px;display:flex;align-items:center;gap:10px;
-      font-size:13px;font-weight:600;color:var(--text2);box-shadow:var(--shadow);
-    }
-    .doc-item-icon{flex-shrink:0;display:flex;align-items:center}
-    .doc-item-icon svg{stroke:var(--gold)}
-
-    /* Notes */
-    .notes-box{
-      background:var(--surface);
-      border:1px solid var(--border);border-left:3px solid var(--gold2);
-      border-radius:var(--radius);padding:15px 16px;font-size:13px;
-      color:var(--text2);line-height:1.75;box-shadow:var(--shadow);
-    }
-
-    /* WhatsApp CTA */
-    .cta-wrap{
-      position:fixed;bottom:0;left:0;right:0;z-index:50;
-      background:linear-gradient(to top,var(--bg) 60%,rgba(244,246,249,0));
-      padding:20px 16px max(16px,env(safe-area-inset-bottom,16px));
-    }
-    .cta-btn{
-      display:flex;align-items:center;justify-content:center;gap:10px;
-      background:linear-gradient(135deg,#1da851,#25d366);
-      color:#fff;text-decoration:none;
-      font-size:15px;font-weight:700;letter-spacing:.1px;
-      border-radius:var(--radius);padding:16px 24px;
-      max-width:680px;margin:0 auto;
-      box-shadow:0 4px 20px rgba(37,211,102,.3);
-      transition:transform .15s,box-shadow .15s;
-    }
-    .cta-btn:active{transform:scale(.98);box-shadow:0 2px 10px rgba(37,211,102,.25)}
-    .cta-icon{display:flex;align-items:center;line-height:1}
-    .cta-icon svg{fill:#fff}
-    .cta-no-phone{text-align:center;color:var(--muted);font-size:13px;max-width:680px;margin:0 auto;font-weight:500}
-
-    /* Expiry notice */
-    .expiry{
-      max-width:720px;margin:12px auto 0;padding:10px 16px;
-      display:flex;align-items:center;justify-content:center;gap:6px;
-      background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
-      font-size:11px;color:var(--muted2);font-weight:600;letter-spacing:.2px;
-    }
-    .expiry svg{stroke:var(--muted2);flex-shrink:0}
-
-    /* Lightbox */
-    #lb{
-      display:none;position:fixed;inset:0;z-index:9999;
-      background:rgba(5,8,14,.97);flex-direction:column;
-      align-items:center;justify-content:center;
-    }
-    #lb.open{display:flex}
-    .lb-header{
-      position:absolute;top:0;left:0;right:0;
-      padding:max(16px,env(safe-area-inset-top,16px)) 16px 20px;
-      display:flex;align-items:center;justify-content:space-between;
-      background:linear-gradient(to bottom,rgba(5,8,14,.85),transparent);
-    }
-    .lb-count{color:rgba(255,255,255,.7);font-size:13px;font-weight:600;letter-spacing:.3px}
-    .lb-close{
-      width:36px;height:36px;border-radius:50%;
-      background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);
-      display:flex;align-items:center;justify-content:center;
-      cursor:pointer;transition:background .15s;
-    }
-    .lb-close:hover{background:rgba(255,255,255,.18)}
-    .lb-close svg{stroke:#fff}
-    #lb-img{max-width:94vw;max-height:78vh;object-fit:contain;border-radius:8px;user-select:none}
-    .lb-arrow{
-      position:absolute;top:50%;transform:translateY(-50%);
-      width:42px;height:42px;border-radius:50%;
-      background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
-      display:flex;align-items:center;justify-content:center;
-      cursor:pointer;transition:background .15s;z-index:10;
-    }
-    .lb-arrow:hover{background:rgba(255,255,255,.16)}
-    .lb-arrow svg{stroke:#fff}
-    #lb-prev{left:12px}#lb-next{right:12px}
-    .lb-arrow.disabled{opacity:.25;pointer-events:none}
-  </style>
+/* bottom sheet */
+.ov{position:fixed;inset:0;background:rgba(10,16,35,.5);opacity:0;pointer-events:none;transition:opacity .25s;z-index:60}
+.ov.open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:70;background:#fff;border-radius:24px 24px 0 0;padding:10px 18px max(22px,env(safe-area-inset-bottom,22px));transform:translateY(105%);transition:transform .3s cubic-bezier(.2,.8,.2,1);max-width:560px;margin:0 auto}
+.sheet.open{transform:translateY(0)}
+.grab{width:44px;height:5px;border-radius:3px;background:#d5dbe8;margin:0 auto 14px}
+.sheet h4{font-size:18px;font-weight:800;text-align:center}
+.sheet p{font-size:13px;color:var(--mute);text-align:center;margin:4px 0 16px}
+.opt{display:flex;align-items:center;gap:14px;text-decoration:none;border-radius:16px;padding:15px 16px;margin-bottom:10px;font-weight:700;font-size:16px}
+.opt small{display:block;font-weight:500;font-size:12.5px;opacity:.85;margin-top:1px}
+.opt .ic{width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.opt .ic svg{width:24px;height:24px;fill:#fff}
+.opt.wa{background:#25d366;color:#fff}
+.opt.call{background:var(--navy);color:#fff}
+.cancel{display:block;width:100%;border:0;background:#eef2fb;color:var(--ink);font:600 15px 'Inter',sans-serif;padding:14px;border-radius:14px;margin-top:2px;cursor:pointer}
+</style>
 </head>
 <body>
+<div class="wrap">
+  <div class="top"><h1>Kin <b>Property</b> Management</h1></div>
 
-  <!-- ── Header ── -->
-  <div class="header">
-    <div class="header-strip"></div>
-    <div class="header-body">
-      <div class="header-badge">
-        <div class="header-badge-dot"></div>
-        <div class="header-badge-text">Real Estate</div>
-      </div>
-      <div class="header-name">KIN <span>Property</span> Management</div>
-      <div class="header-sub">Your Property · Our Trust</div>
-      <div class="header-divider"></div>
-    </div>
+  <div class="gal">${galleryHTML}</div>
+
+  <div class="title">
+    <h2>${esc(p.projectName || p.society || '')}</h2>
+    ${(p.flatConfig || p.bhk) ? `<div class="pill">${esc(p.flatConfig || p.bhk)}</div>` : ''}
+  </div>
+  ${(p.address || p.location) ? `<div class="addr">📍 ${esc([p.address, p.location].filter(Boolean).join(', '))}${p.nearbyLocalities ? ' · Near ' + esc(p.nearbyLocalities) : ''}</div>` : ''}
+  ${statusLabel ? `<div class="stat">${statusLabel}</div>` : ''}
+
+  <div class="price">
+    <div class="l">${isRent ? 'MONTHLY RENT' : 'SALE PRICE'}</div>
+    <div class="v">${priceMain || '—'}</div>
+    ${perSqft ? `<div class="s">${perSqft}</div>` : ''}
+    ${p.maintenance ? `<div class="s">+ ₹${esc(p.maintenance)}/mo maintenance</div>` : ''}
+    ${isRent && p.securityDeposit ? `<div class="dep"><div><small>Security Deposit</small><b>₹${num(p.securityDeposit).toLocaleString('en-IN')}</b></div></div>` : ''}
   </div>
 
-  <!-- ── Gallery ── -->
-  ${galleryHTML}
+  ${detailsHTML ? `<div class="card"><h3><i>🏠</i>Property Details</h3><div class="dgrid">${detailsHTML}</div></div>` : ''}
 
-  <!-- ── Property Title ── -->
-  <div class="prop-title-block">
-    <div class="prop-title">${p.projectName || ''}</div>
-    ${p.address ? `<div class="prop-addr">${p.address}</div>` : ''}
-  </div>
+  ${amenitiesHTML ? `<div class="card"><h3><i>🏰</i>Amenities</h3><div class="agrid">${amenitiesHTML}</div></div>` : ''}
 
-  <!-- ── Content ── -->
-  <div class="content">
+  ${(p.documents && p.documents.length) ? `<div class="card"><h3><i>📄</i>Documents Available</h3><div class="docs">${p.documents.map((d) => `<div class="doc">✔ ${esc(d)}</div>`).join('')}</div></div>` : ''}
 
-    <!-- Tags -->
-    <div class="tags">
-      <span class="tag tag-status">● ${statusLabel}</span>
-      <span class="tag tag-listing">${isRent ? 'For Rent' : 'For Sale'}</span>
-      ${p.propertyType ? `<span class="tag tag-type">${p.propertyType}</span>` : ''}
-      ${p.flatConfig   ? `<span class="tag tag-type">${p.flatConfig}</span>`   : ''}
-    </div>
+  ${p.notes ? `<div class="card"><h3><i>📝</i>Additional Info</h3><div class="notes">${esc(p.notes)}</div></div>` : ''}
 
-    <!-- Location -->
-    <div class="loc-card">
-      <div class="loc-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg></div>
-      <div>
-        <div class="loc-name">${p.location || '—'}</div>
-        ${p.nearbyLocalities ? `<div class="loc-nearby">Near: ${p.nearbyLocalities}</div>` : ''}
-      </div>
-    </div>
+  ${req.params.token ? `<div class="exp">🕐 This link is valid for 48 hours</div>` : ''}
+</div>
 
-    <!-- Price -->
-    <div class="price-card">
-      <div class="price-eyebrow">${isRent ? 'Monthly Rent' : 'Sale Price'}</div>
-      <div class="price-main">${priceDisplay || '—'}</div>
-      ${p.maintenance ? `<div class="price-sub">+ ₹${p.maintenance}/mo maintenance</div>` : ''}
-      ${isRent && (p.securityDeposit || p.monthlyRent) ? `
-      <div class="price-pills">
-        ${p.monthlyRent    ? `<div class="price-pill"><div class="price-pill-label">Monthly Rent</div><div class="price-pill-val">₹${Number(String(p.monthlyRent).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
-        ${p.securityDeposit ? `<div class="price-pill"><div class="price-pill-label">Security Deposit</div><div class="price-pill-val">₹${Number(String(p.securityDeposit).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
-      </div>` : ''}
-    </div>
+<!-- Contact bar -->
+<div class="bar">
+  <button class="cta" id="open-contact" type="button">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.2"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7z"/></svg>
+    Contact Agent
+  </button>
+</div>
 
-    <!-- Possession -->
-    ${p.possession ? `
-    <div class="poss-banner ${p.possession === 'Ready to Move' ? 'rtm' : 'uc'}">
-      <div class="poss-icon">${p.possession === 'Ready to Move'
-        ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><path d="M20 6L9 17l-5-5"/></svg>`
-        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><rect x="2" y="14" width="20" height="8" rx="1"/><path d="M6 14V8a2 2 0 012-2h3"/><path d="M18 14V8"/><path d="M12 2l6 6H6l6-6z"/></svg>`
-      }</div>
-      <div>
-        <div class="poss-title">${p.possession}</div>
-        ${p.possessionDate ? `<div class="poss-sub">Expected: ${p.possessionDate}</div>` : ''}
-      </div>
-    </div>` : ''}
+<div class="ov" id="ov"></div>
+<div class="sheet" id="sheet" role="dialog" aria-label="Contact agent">
+  <div class="grab"></div>
+  <h4>Contact Agent</h4>
+  <p>Kin Property Management</p>
+  <a class="opt wa" href="${waLink}" target="_blank" rel="noopener">
+    <span class="ic"><svg viewBox="0 0 24 24"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.16-.17.2-.35.22-.64.07-.3-.15-1.26-.46-2.39-1.48-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.6.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.92-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.88 1.21 3.07.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35zM12 21.8a9.8 9.8 0 01-5-1.37l-.36-.21-3.71.97.99-3.6-.23-.37A9.8 9.8 0 1112 21.8zM12 0C5.37 0 0 5.37 0 12c0 2.12.55 4.12 1.53 5.86L0 24l6.3-1.65A12 12 0 1012 0z"/></svg></span>
+    <span>Chat on WhatsApp<small>+91 ${AGENT_PHONE}</small></span>
+  </a>
+  <a class="opt call" href="${telLink}">
+    <span class="ic"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></span>
+    <span>Call Now<small>+91 ${AGENT_PHONE}</small></span>
+  </a>
+  <button class="cancel" id="close-contact" type="button">Cancel</button>
+</div>
 
-    <!-- Property Details -->
-    <div class="section">
-      <div class="section-head"><div class="section-head-label">Property Details</div><div class="section-head-line"></div></div>
-      <div class="dc-grid">
-        ${card('type','Type', p.propertyType)}
-        ${card('carpet','Carpet Area', p.carpetArea)}
-        ${card('buildup','Buildup Area', p.buildupArea)}
-        ${card('floors','Total Floors', p.totalFloors)}
-        ${card('facing','Facing', p.facing)}
-        ${card('lift','Lift', p.lift)}
-        ${card('parking','Parking', p.parking)}
-        ${card('water','Water', p.water)}
-        ${card('sanction','Sanction', p.sanction)}
-        ${card('furnishing','Furnishing', p.furnishing)}
-        ${card('age','Property Age', p.propertyAge)}
-        ${p.flatsOnFloor ? card('flats','Flats/Floor', p.flatsOnFloor) : ''}
-      </div>
-    </div>
+<script>
+(function(){
+  var PHOTOS = ${JSON.stringify(photos).replace(/</g, '\\u003c')};
+  var cur = 0;
+  var img = document.getElementById('hero-img');
+  var cnt = document.getElementById('cnt');
+  var thumbs = document.querySelectorAll('.th');
 
-    <!-- Amenities -->
-    ${p.amenities && p.amenities.length ? `
-    <div class="section">
-      <div class="section-head"><div class="section-head-label">Amenities</div><div class="section-head-line"></div></div>
-      <div class="amenity-list">
-        ${p.amenities.map(a => `<div class="amenity-chip"><svg class="amenity-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><polyline points="20 6 9 17 4 12"/></svg>${a}</div>`).join('')}
-      </div>
-    </div>` : ''}
-
-    <!-- Documents -->
-    ${p.documents && p.documents.length ? `
-    <div class="section">
-      <div class="section-head"><div class="section-head-label">Documents Available</div><div class="section-head-line"></div></div>
-      <div class="doc-list">
-        ${p.documents.map(d => `<div class="doc-item"><div class="doc-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg></div>${d}</div>`).join('')}
-      </div>
-    </div>` : ''}
-
-    <!-- Notes -->
-    ${p.notes ? `
-    <div class="section">
-      <div class="section-head"><div class="section-head-label">Additional Info</div><div class="section-head-line"></div></div>
-      <div class="notes-box">${p.notes}</div>
-    </div>` : ''}
-
-    <!-- Expiry -->
-    ${req.params.token ? `<div class="expiry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> This link is valid for 48 hours</div>` : ''}
-
-  </div><!-- /content -->
-
-  <!-- ── WhatsApp CTA ── -->
-  <div class="cta-wrap">
-    ${p.ownerPhone
-      ? `<a class="cta-btn" href="https://wa.me/91${p.ownerPhone.replace(/\D/g,'')}?text=${encodeURIComponent(`Hi, I'm interested in the property at ${p.location}. Can you share more details?`)}">
-          <span class="cta-icon"><svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.127.558 4.126 1.532 5.857L.057 23.882a.5.5 0 00.61.61l6.025-1.475A11.944 11.944 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.808 9.808 0 01-5.006-1.37l-.36-.214-3.714.91.927-3.601-.235-.37A9.818 9.818 0 012.182 12C2.182 6.57 6.57 2.182 12 2.182S21.818 6.57 21.818 12 17.43 21.818 12 21.818z"/></svg></span> Enquire on WhatsApp
-        </a>`
-      : `<div class="cta-no-phone">Contact your agent for more details</div>`}
-  </div>
-
-  <!-- ── Lightbox ── -->
-  <div id="lb">
-    <div class="lb-header">
-      <div class="lb-close" onclick="closeLb()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" width="16" height="16"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
-      <div class="lb-count" id="lbCount"></div>
-      <div style="width:36px"></div>
-    </div>
-    <img id="lb-img" src="" alt="Property photo">
-    ${photos.length > 1 ? `
-    <div class="lb-arrow" id="lb-prev" onclick="navLb(-1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><polyline points="15 18 9 12 15 6"/></svg></div>
-    <div class="lb-arrow" id="lb-next" onclick="navLb(1)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><polyline points="9 18 15 12 9 6"/></svg></div>` : ''}
-  </div>
-
-  <script>
-    const PHOTOS = ${lbPhotos};
-    let cur = 0;
-    function updLb() {
-      document.getElementById('lb-img').src = PHOTOS[cur];
-      document.getElementById('lbCount').textContent = PHOTOS.length ? (cur+1) + ' / ' + PHOTOS.length : '';
-      const prev = document.getElementById('lb-prev');
-      const next = document.getElementById('lb-next');
-      if (prev) prev.classList.toggle('disabled', cur <= 0);
-      if (next) next.classList.toggle('disabled', cur >= PHOTOS.length - 1);
+  function show(i){
+    if(!PHOTOS.length) return;
+    cur = (i + PHOTOS.length) % PHOTOS.length;
+    img.src = PHOTOS[cur];
+    cnt.textContent = (cur + 1) + ' / ' + PHOTOS.length;
+    for(var k = 0; k < thumbs.length; k++){
+      thumbs[k].classList.toggle('on', parseInt(thumbs[k].getAttribute('data-i'), 10) === cur);
     }
-    function openLb(i) {
-      cur = i; updLb();
-      document.getElementById('lb').classList.add('open');
-      document.body.style.overflow = 'hidden';
-    }
-    function closeLb() {
-      document.getElementById('lb').classList.remove('open');
-      document.body.style.overflow = '';
-    }
-    function navLb(d) {
-      const n = cur + d;
-      if (n >= 0 && n < PHOTOS.length) { cur = n; updLb(); }
-    }
-    document.getElementById('lb').addEventListener('click', e => { if (e.target === document.getElementById('lb')) closeLb(); });
-    let sx = 0;
-    document.getElementById('lb').addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive: true });
-    document.getElementById('lb').addEventListener('touchend', e => {
-      const dx = e.changedTouches[0].clientX - sx;
-      if (Math.abs(dx) > 45 && PHOTOS.length > 1) navLb(dx < 0 ? 1 : -1);
+  }
+  var prev = document.getElementById('prev');
+  var next = document.getElementById('next');
+  if(prev) prev.addEventListener('click', function(){ show(cur - 1); });
+  if(next) next.addEventListener('click', function(){ show(cur + 1); });
+  for(var t = 0; t < thumbs.length; t++){
+    thumbs[t].addEventListener('click', function(){
+      show(parseInt(this.getAttribute('data-i'), 10));
     });
-    document.addEventListener('keydown', e => {
-      if (!document.getElementById('lb').classList.contains('open')) return;
-      if (e.key === 'ArrowLeft') navLb(-1);
-      if (e.key === 'ArrowRight') navLb(1);
-      if (e.key === 'Escape') closeLb();
+  }
+  // swipe on hero
+  var hero = document.getElementById('hero'), sx = 0;
+  if(hero && PHOTOS.length > 1){
+    hero.addEventListener('touchstart', function(e){ sx = e.touches[0].clientX; }, {passive:true});
+    hero.addEventListener('touchend', function(e){
+      var dx = e.changedTouches[0].clientX - sx;
+      if(Math.abs(dx) > 40) show(dx < 0 ? cur + 1 : cur - 1);
     });
-  </script>
+  }
+
+  // contact sheet
+  var ov = document.getElementById('ov'), sheet = document.getElementById('sheet');
+  function openS(){ ov.classList.add('open'); sheet.classList.add('open'); }
+  function closeS(){ ov.classList.remove('open'); sheet.classList.remove('open'); }
+  document.getElementById('open-contact').addEventListener('click', openS);
+  document.getElementById('close-contact').addEventListener('click', closeS);
+  ov.addEventListener('click', closeS);
+})();
+</script>
 </body>
 </html>`);
   } catch (err) {
@@ -948,6 +663,8 @@ exports.getGalleryPage = async (req, res) => {
   }
 };
 
+
+// ─── EXPORT CSV ───────────────────────────────────────────────────────────────
 
 exports.exportCSV = async (req, res) => {
   try {
