@@ -331,7 +331,7 @@ exports.createShareLink = async (req, res) => {
     const property = await Property.findById(req.params.id);
     if (!property) return res.status(404).json({ success: false, message: 'Property not found' });
     const token = crypto.randomBytes(20).toString('hex');
-    const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hrs
+    const expiry = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hrs
     property.shareToken = token;
     property.shareTokenExpiry = expiry;
     await property.save();
@@ -348,14 +348,13 @@ exports.createShareLink = async (req, res) => {
 exports.getGalleryPage = async (req, res) => {
   try {
     let property;
-    // Route can be called with token (/share/:token) or legacy id (:id/gallery)
     if (req.params.token) {
       property = await Property.findOne({
         shareToken: req.params.token,
         shareTokenExpiry: { $gt: new Date() },
       });
       if (!property) {
-        return res.status(410).send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>body{margin:0;background:#0f0f0f;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;text-align:center;}</style></head><body><div><div style="font-size:52px">⏰</div><h2 style="margin:16px 0 8px">Link Expired</h2><p style="color:#9ca3af">This property link was valid for 24 hours and has expired.<br>Ask the agent to send you a fresh link.</p></div></body></html>`);
+        return res.status(410).send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#0d1117;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.card{background:#161b22;border:1px solid #30363d;border-radius:20px;padding:48px 36px;text-align:center;max-width:380px;width:90%}.icon{font-size:56px;margin-bottom:20px}.title{font-size:22px;font-weight:800;color:#e6edf3;margin-bottom:10px}.sub{font-size:14px;color:#8b949e;line-height:1.6}</style></head><body><div class="card"><div class="icon">⏰</div><div class="title">Link Expired</div><div class="sub">This property link was valid for 48 hours and has expired.<br><br>Ask the agent to send you a fresh link.</div></div></body></html>`);
       }
     } else {
       property = await Property.findById(req.params.id);
@@ -369,367 +368,453 @@ exports.getGalleryPage = async (req, res) => {
     function fmt(n) {
       if (!n) return '';
       const num = parseFloat(String(n).replace(/,/g, ''));
-      if (isNaN(num) || num === 0) return n;
+      if (isNaN(num) || num === 0) return String(n);
       if (num >= 10000000) return `₹${(num/10000000).toFixed(2).replace(/\.?0+$/,'')} Cr`;
-      if (num >= 100000) return `₹${(num/100000).toFixed(2).replace(/\.?0+$/,'')} L`;
+      if (num >= 100000)   return `₹${(num/100000).toFixed(2).replace(/\.?0+$/,'')} L`;
       return `₹${num.toLocaleString('en-IN')}`;
     }
 
-    function row(icon, label, value) {
+    function card(icon, label, value) {
       if (!value) return '';
-      return `<div class="drow"><span class="dicon">${icon}</span><div><div class="dlabel">${label}</div><div class="dval">${value}</div></div></div>`;
-    }
-
-    function chips(arr) {
-      if (!arr || !arr.length) return '';
-      return arr.map(a => `<span class="chip">${a}</span>`).join('');
+      return `<div class="dc"><div class="dc-icon">${icon}</div><div class="dc-label">${label}</div><div class="dc-val">${value}</div></div>`;
     }
 
     const priceDisplay = isRent
-      ? (p.monthlyRent ? `₹${Number(String(p.monthlyRent).replace(/,/g,'') || 0).toLocaleString('en-IN')}/mo` : fmt(p.price))
+      ? (p.monthlyRent ? `₹${Number(String(p.monthlyRent).replace(/,/g,'')||0).toLocaleString('en-IN')}/mo` : fmt(p.price))
       : fmt(p.price);
 
-    const statusColor = p.status === 'available' ? '#22c55e' : p.status === 'sold' ? '#ef4444' : '#f59e0b';
-    const statusLabel = p.status === 'available' ? 'Available' : p.status === 'sold' ? 'Sold' : 'Rented';
+    const statusColor  = p.status === 'available' ? '#22c55e' : p.status === 'sold' ? '#ef4444' : '#f59e0b';
+    const statusBg     = p.status === 'available' ? '#052e16' : p.status === 'sold' ? '#450a0a' : '#431407';
+    const statusLabel  = p.status === 'available' ? 'Available' : p.status === 'sold' ? 'Sold' : 'Rented';
 
-    const photosHTML = photos.length ? `
-      <div class="photo-hero" id="hero" onclick="openLb(0)">
-        <img id="heroImg" src="${photos[0]}" alt="${p.projectName}" loading="eager">
-        <div class="photo-count">📷 ${photos.length} photo${photos.length > 1 ? 's' : ''}</div>
-        <div class="hero-overlay">Tap to view all</div>
-      </div>
-      ${photos.length > 1 ? `<div class="thumb-row">${photos.slice(1,5).map((u,i) => `<div class="thumb" onclick="openLb(${i+1})"><img src="${u}" loading="lazy"><div class="thumb-overlay">${i === 3 && photos.length > 5 ? `+${photos.length-5}` : ''}</div></div>`).join('')}</div>` : ''}
-    ` : `<div class="no-photo">🏠<p>No photos yet</p></div>`;
+    // ── Photo gallery HTML ───────────────────────────────────────────────────
+    const galleryHTML = photos.length ? `
+      <div class="gallery">
+        <div class="gallery-hero" onclick="openLb(0)">
+          <img src="${photos[0]}" alt="Property photo" loading="eager">
+          <div class="gallery-overlay"><span class="gallery-overlay-icon">⊕</span> View Photos</div>
+          <div class="gallery-badge"><span>📷</span> ${photos.length} photo${photos.length > 1 ? 's' : ''}</div>
+        </div>
+        ${photos.length > 1 ? `
+        <div class="gallery-thumbs">
+          ${photos.slice(1, 5).map((u, i) => `
+            <div class="gallery-thumb" onclick="openLb(${i+1})">
+              <img src="${u}" loading="lazy">
+              ${i === 3 && photos.length > 5 ? `<div class="gallery-thumb-more">+${photos.length - 5}</div>` : ''}
+            </div>`).join('')}
+        </div>` : ''}
+      </div>` : `
+      <div class="no-photo">
+        <div class="no-photo-icon">🏠</div>
+        <p>No photos available</p>
+      </div>`;
 
     const lbPhotos = JSON.stringify(photos);
 
-    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src *; style-src 'unsafe-inline'; script-src 'unsafe-inline';");
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src *; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src 'none';");
     res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0a0a0a">
-  <title>${p.projectName} — KIN Property</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d1117">
+  <title>KIN Property Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --gold: #b9953b;
-      --gold2: #e4c979;
-      --dark: #f5f6f8;
-      --card: #ffffff;
-      --card2: #f8f9fb;
-      --border: #e5e7eb;
-      --text: #172033;
-      --muted: #667085;
-      --green: #16845b;
-      --navy: #101b32;
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#f0f2f5;
+      --surface:#ffffff;
+      --surface2:#f8f9fb;
+      --border:#e4e7ec;
+      --navy:#0d1b2a;
+      --navy2:#1a2d45;
+      --gold:#c49a3c;
+      --gold-light:#fdf5e6;
+      --text:#111827;
+      --muted:#6b7280;
+      --green:#16a34a;
+      --green-dark:#14532d;
+      --wa:#25d366;
+      --radius:16px;
+      --shadow:0 1px 3px rgba(0,0,0,.06),0 4px 16px rgba(0,0,0,.06);
+      --shadow-lg:0 8px 32px rgba(0,0,0,.10);
     }
-    html { scroll-behavior: smooth; }
-    body { background: var(--dark); color: var(--text); font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; line-height: 1.5; }
+    html{scroll-behavior:smooth;-webkit-tap-highlight-color:transparent}
+    body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;min-height:100vh;line-height:1.5;padding-bottom:100px}
 
-    /* Premium brand header */
-    .brand-header {
-      background: var(--navy);
-      border-bottom: 3px solid var(--gold);
-      padding: 22px 20px 20px;
-      text-align: center;
+    /* ── Header ── */
+    .header{
+      background:linear-gradient(135deg,#0d1b2a 0%,#1a2d45 50%,#0d1b2a 100%);
+      padding:env(safe-area-inset-top,0) 20px 0;
+      position:relative;overflow:hidden;
     }
-    .brand-logo { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #d8c17c; font-weight: 700; margin-bottom: 5px; }
-    .brand-name {
-      font-size: 28px; font-weight: 850; letter-spacing: 2px;
-      color: #fff;
+    .header::before{
+      content:'';position:absolute;width:320px;height:320px;
+      border:1px solid rgba(196,154,60,.15);border-radius:50%;
+      right:-80px;top:-200px;
+      box-shadow:0 0 0 32px rgba(196,154,60,.04),0 0 0 64px rgba(196,154,60,.025);
+      pointer-events:none;
     }
-    .brand-tagline { font-size: 11px; color: #c7cedb; letter-spacing: 1.5px; margin-top: 5px; }
+    .header-inner{max-width:680px;margin:0 auto;padding:24px 0 22px;text-align:center;position:relative}
+    .header-eyebrow{font-size:9px;letter-spacing:4px;text-transform:uppercase;color:var(--gold);font-weight:700;margin-bottom:8px}
+    .header-logo{font-size:26px;font-weight:900;color:#ffffff;letter-spacing:2px;line-height:1}
+    .header-tagline{font-size:10px;color:#8fa3bc;letter-spacing:2px;margin-top:6px;text-transform:uppercase}
+    .header-divider{height:3px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin-top:20px}
 
-    /* Gallery */
-    .photo-hero {
-      position: relative; width: min(1120px, calc(100% - 40px)); aspect-ratio: 16/7; max-height: 500px;
-      overflow: hidden; cursor: pointer; background: #e9edf2; margin: 26px auto 0; border-radius: 18px;
-      box-shadow: 0 12px 32px rgba(16,27,50,.12);
+    /* ── Gallery ── */
+    .gallery{max-width:720px;margin:24px auto 0;padding:0 16px}
+    .gallery-hero{
+      position:relative;border-radius:var(--radius);overflow:hidden;
+      aspect-ratio:4/3;cursor:pointer;background:#dde1e7;
+      box-shadow:var(--shadow-lg);
     }
-    .photo-hero img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .4s; }
-    .photo-hero:hover img { transform: scale(1.015); }
-    .photo-hero:active img { transform: scale(.99); }
-    .photo-count { position: absolute; bottom: 14px; right: 14px; background: rgba(16,27,50,.82); color: #fff; font-size: 12px; font-weight: 700; padding: 7px 12px; border-radius: 9px; }
-    .hero-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(16,27,50,0); color: #fff; font-size: 14px; font-weight: 700; opacity: 0; transition: all .2s; }
-    .photo-hero:hover .hero-overlay { opacity: 1; background: rgba(16,27,50,.22); }
-    .thumb-row { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; width: min(1120px, calc(100% - 40px)); margin: 10px auto 0; background: transparent; }
-    .thumb { position: relative; aspect-ratio: 16/7; overflow: hidden; cursor: pointer; background: #e9edf2; border-radius: 10px; }
-    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s; }
-    .thumb:hover img { transform: scale(1.04); }
-    .thumb:active img { transform: scale(.98); }
-    .thumb-overlay { position: absolute; inset: 0; background: rgba(16,27,50,.5); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: 800; }
-    .no-photo { width: min(1120px, calc(100% - 40px)); margin: 26px auto 0; padding: 64px 24px; text-align: center; background: #fff; border: 1px dashed #cbd2dc; border-radius: 18px; color: var(--muted); font-size: 32px; }
-    .no-photo p { font-size: 14px; margin-top: 8px; }
+    @media(min-width:500px){.gallery-hero{aspect-ratio:16/9}}
+    .gallery-hero img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s ease}
+    .gallery-hero:hover img{transform:scale(1.03)}
+    .gallery-overlay{
+      position:absolute;inset:0;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;gap:6px;
+      background:rgba(13,27,42,0);color:#fff;font-size:13px;font-weight:700;
+      opacity:0;transition:all .25s;letter-spacing:.3px;
+    }
+    .gallery-overlay-icon{font-size:28px;line-height:1}
+    .gallery-hero:hover .gallery-overlay,.gallery-hero:active .gallery-overlay{opacity:1;background:rgba(13,27,42,.38)}
+    .gallery-badge{
+      position:absolute;bottom:12px;right:12px;
+      background:rgba(13,27,42,.75);backdrop-filter:blur(6px);
+      color:#fff;font-size:11px;font-weight:700;padding:6px 11px;border-radius:10px;
+      display:flex;align-items:center;gap:5px;
+    }
+    .gallery-thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+    .gallery-thumb{
+      position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;
+      cursor:pointer;background:#dde1e7;
+    }
+    .gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s}
+    .gallery-thumb:hover img,.gallery-thumb:active img{transform:scale(1.06)}
+    .gallery-thumb-more{
+      position:absolute;inset:0;background:rgba(13,27,42,.6);
+      display:flex;align-items:center;justify-content:center;
+      color:#fff;font-size:16px;font-weight:800;
+    }
+    .no-photo{
+      max-width:720px;margin:24px auto 0;padding:56px 24px;text-align:center;
+      background:var(--surface);border:2px dashed var(--border);border-radius:var(--radius);
+    }
+    .no-photo-icon{font-size:42px;margin-bottom:10px}
+    .no-photo p{color:var(--muted);font-size:14px}
 
-    /* Main content */
-    .body { padding: 0 0 120px; width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
-    .title-block { padding: 28px 0 20px; border-bottom: 1px solid var(--border); }
-    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 5px 11px; border-radius: 7px; font-size: 11px; font-weight: 750; letter-spacing: .2px; }
-    .badge-status { background: ${statusColor}12; color: ${statusColor}; border: 1px solid ${statusColor}30; }
-    .badge-listing { background: #f8f2e3; color: #8b6a19; border: 1px solid #e9d9ad; }
-    .badge-type { background: #f0f3f7; color: #465269; border: 1px solid #e1e6ee; }
-    .prop-title { font-size: clamp(25px, 3vw, 36px); font-weight: 800; color: var(--navy); line-height: 1.2; margin-bottom: 8px; letter-spacing: -.5px; }
-    .prop-location { color: var(--muted); font-size: 15px; display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
-    .title-block > div[style] { color: #667085 !important; margin-top: 0 !important; }
+    /* ── Main content ── */
+    .content{max-width:720px;margin:0 auto;padding:20px 16px 0}
+
+    /* Status + listing row */
+    .tags{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+    .tag{
+      display:inline-flex;align-items:center;gap:5px;
+      padding:5px 12px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.2px;
+    }
+    .tag-status{background:${statusBg};color:${statusColor};border:1px solid ${statusColor}40}
+    .tag-listing{background:#1c1400;color:#d4a017;border:1px solid #d4a01740}
+    .tag-type{background:#0f172a;color:#94a3b8;border:1px solid #94a3b820}
+
+    /* Location card */
+    .loc-card{
+      background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+      padding:18px 20px;margin-bottom:12px;display:flex;align-items:center;gap:14px;
+      box-shadow:var(--shadow);
+    }
+    .loc-icon{
+      width:44px;height:44px;border-radius:12px;
+      background:linear-gradient(135deg,#1e3a5f,#2a5298);
+      display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;
+    }
+    .loc-name{font-size:17px;font-weight:800;color:var(--text);line-height:1.3}
+    .loc-nearby{font-size:12px;color:var(--muted);margin-top:3px}
 
     /* Price card */
-    .price-block { background: linear-gradient(135deg, #fff 0%, #fbf8ef 100%); border: 1px solid #e8dfc8; border-radius: 16px; padding: 22px 24px; margin: 22px 0; box-shadow: 0 5px 18px rgba(16,27,50,.04); }
-    .price-label { font-size: 11px; color: #8b6a19; text-transform: uppercase; letter-spacing: 1.3px; font-weight: 750; margin-bottom: 6px; }
-    .price-value { font-size: clamp(30px, 4vw, 38px); font-weight: 850; color: var(--navy); line-height: 1.1; }
-    .price-sub { font-size: 12px; color: var(--muted); margin-top: 7px; }
-    .price-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
-    .price-item { background: #fff; border: 1px solid #e8eaf0; border-radius: 10px; padding: 10px 14px; flex: 1; min-width: 140px; }
-    .price-item-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
-    .price-item-val { font-size: 16px; font-weight: 750; color: var(--text); margin-top: 3px; }
-
-    .section { margin: 28px 0; }
-    .section-title { font-size: 12px; color: var(--navy); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 800; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
-    .section-title::after { content: ''; flex: 1; height: 1px; background: #dfe3ea; }
-    .detail-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
-    .drow { background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 15px 16px; display: flex; align-items: flex-start; gap: 11px; box-shadow: 0 2px 6px rgba(16,27,50,.025); }
-    .drow.full { grid-column: 1/-1; }
-    .dicon { font-size: 20px; margin-top: 1px; flex-shrink: 0; }
-    .dlabel { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 4px; font-weight: 700; }
-    .dval { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.35; overflow-wrap: anywhere; }
-
-    .chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
-    .chip { background: #fff; border: 1px solid #e1e6ee; border-radius: 8px; padding: 7px 12px; font-size: 12px; color: #465269; font-weight: 600; }
-    .chip.gold { background: #fbf7e9; border-color: #e9d9ad; color: #8b6a19; }
-    .possession-banner { background: #edf8f2; border: 1px solid #ccebd9; border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; gap: 12px; }
-    .possession-icon { font-size: 24px; }
-    .possession-title { font-size: 14px; font-weight: 800; color: #16845b; }
-    .possession-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
-    .possession-uc { background: #fff8e9; border-color: #f2dfb2; }
-    .possession-uc .possession-title { color: #9a6a08; }
-    .doc-item { display: flex; align-items: center; gap: 8px; background: #fff !important; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: var(--text) !important; font-weight: 600; }
-
-    /* Sticky contact action */
-    .footer { position: fixed; bottom: 0; left: 0; right: 0; background: linear-gradient(to top, rgba(245,246,248,1) 72%, rgba(245,246,248,0)); padding: 22px max(20px, calc((100vw - 1120px)/2)) 20px; z-index: 20; }
-    .cta-btn { display: flex; align-items: center; justify-content: center; gap: 9px; background: #16845b; color: #fff; font-size: 15px; font-weight: 800; border: none; border-radius: 11px; padding: 16px; width: 100%; max-width: 1120px; margin: 0 auto; text-decoration: none; cursor: pointer; letter-spacing: .2px; box-shadow: 0 6px 18px rgba(22,132,91,.22); }
-    .cta-btn:hover { background: #116d4b; }
-    .expiry-bar { background: #f9f4e6; border-top: 1px solid #eee2c3; padding: 10px 14px; text-align: center; font-size: 11px; color: #8b6a19; }
-
-    /* Photo lightbox */
-    #lb { display: none; position: fixed; inset: 0; background: rgba(8,14,27,.97); z-index: 999; flex-direction: column; align-items: center; justify-content: center; touch-action: pan-y; }
-    #lb.open { display: flex; }
-    .lb-bar { position: fixed; top: 0; left: 0; right: 0; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; background: linear-gradient(to bottom, rgba(0,0,0,.85), transparent); z-index: 10; }
-    .lb-close { width: 38px; height: 38px; border-radius: 50%; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; color: #fff; }
-    .lb-counter { color: #d1d5db; font-weight: 600; font-size: 14px; }
-    #lb-img { max-width: 96vw; max-height: 80vh; object-fit: contain; border-radius: 8px; user-select: none; }
-    .lb-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 42px; height: 42px; border-radius: 50%; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 20px; color: #fff; z-index: 10; }
-    #lb-prev { left: 8px; } #lb-next { right: 8px; }
-
-    @media (max-width: 760px) {
-      .brand-header { padding: 18px 14px 16px; }
-      .brand-name { font-size: 23px; }
-      .photo-hero { width: 100%; margin-top: 0; border-radius: 0; aspect-ratio: 4/3; max-height: 360px; }
-      .thumb-row { width: calc(100% - 24px); gap: 6px; margin-top: 8px; }
-      .thumb { aspect-ratio: 1; border-radius: 7px; }
-      .body { width: calc(100% - 28px); padding-bottom: 120px; }
-      .title-block { padding-top: 22px; }
-      .detail-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
-      .drow { padding: 12px 11px; gap: 8px; }
-      .dicon { font-size: 17px; }
-      .dval { font-size: 13px; }
-      .price-block { padding: 18px; }
-      .footer { padding: 16px 14px 18px; }
+    .price-card{
+      background:linear-gradient(135deg,#0d1b2a 0%,#1a2d45 100%);
+      border-radius:var(--radius);padding:22px 22px 20px;margin-bottom:12px;
+      position:relative;overflow:hidden;box-shadow:var(--shadow-lg);
     }
-    @media (max-width: 380px) {
-      .detail-grid { grid-template-columns: 1fr; }
-      .prop-title { font-size: 24px; }
+    .price-card::after{
+      content:'₹';position:absolute;right:16px;top:-18px;
+      font-size:110px;font-weight:900;color:rgba(196,154,60,.08);pointer-events:none;line-height:1;
+    }
+    .price-eyebrow{font-size:10px;color:#8fa3bc;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;font-weight:600}
+    .price-main{font-size:clamp(28px,6vw,38px);font-weight:900;color:#ffffff;line-height:1;position:relative;z-index:1}
+    .price-sub{font-size:12px;color:#8fa3bc;margin-top:8px}
+    .price-pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+    .price-pill{
+      background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
+      border-radius:10px;padding:9px 14px;flex:1;min-width:120px;
+    }
+    .price-pill-label{font-size:9px;color:#8fa3bc;text-transform:uppercase;letter-spacing:.8px;font-weight:600}
+    .price-pill-val{font-size:15px;font-weight:800;color:#e2e8f0;margin-top:3px}
+
+    /* Possession banner */
+    .poss-banner{
+      border-radius:var(--radius);padding:16px 18px;margin-bottom:12px;
+      display:flex;align-items:center;gap:14px;
+      box-shadow:var(--shadow);
+    }
+    .poss-banner.rtm{background:#052e16;border:1px solid #16a34a40}
+    .poss-banner.uc{background:#431407;border:1px solid #f59e0b40}
+    .poss-icon{font-size:28px;flex-shrink:0}
+    .poss-title{font-size:14px;font-weight:800}
+    .poss-banner.rtm .poss-title{color:#4ade80}
+    .poss-banner.uc .poss-title{color:#fbbf24}
+    .poss-sub{font-size:12px;color:#94a3b8;margin-top:3px}
+
+    /* Section */
+    .section{margin-bottom:12px}
+    .section-head{
+      display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:0 4px;
+    }
+    .section-head-label{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1.4px;white-space:nowrap}
+    .section-head-line{flex:1;height:1px;background:var(--border)}
+
+    /* Detail cards grid */
+    .dc-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+    @media(min-width:480px){.dc-grid{grid-template-columns:repeat(3,1fr)}}
+    .dc{
+      background:var(--surface);border:1px solid var(--border);border-radius:14px;
+      padding:14px 14px 12px;display:flex;flex-direction:column;gap:6px;
+      box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s,border-color .15s;
+    }
+    .dc:active{transform:scale(.98)}
+    .dc-icon{
+      width:32px;height:32px;border-radius:9px;
+      background:var(--gold-light);display:flex;align-items:center;justify-content:center;font-size:15px;
+    }
+    .dc-label{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-top:2px}
+    .dc-val{font-size:13px;font-weight:700;color:var(--text);line-height:1.3;overflow-wrap:anywhere}
+
+    /* Amenities */
+    .amenity-list{display:flex;flex-wrap:wrap;gap:7px}
+    .amenity-chip{
+      background:var(--surface);border:1px solid var(--border);border-radius:999px;
+      padding:7px 13px;font-size:12px;font-weight:600;color:var(--text);
+      display:flex;align-items:center;gap:5px;
+    }
+    .amenity-chip-dot{width:5px;height:5px;border-radius:50%;background:var(--gold);flex-shrink:0}
+
+    /* Documents */
+    .doc-list{display:flex;flex-direction:column;gap:7px}
+    .doc-item{
+      background:var(--surface);border:1px solid var(--border);border-radius:12px;
+      padding:12px 15px;display:flex;align-items:center;gap:10px;
+      font-size:13px;font-weight:600;color:var(--text);box-shadow:var(--shadow);
+    }
+    .doc-item-icon{font-size:18px;flex-shrink:0}
+
+    /* Notes */
+    .notes-box{
+      background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--gold);
+      border-radius:var(--radius);padding:15px 16px;font-size:13px;
+      color:var(--muted);line-height:1.7;box-shadow:var(--shadow);
     }
 
-    /* Final premium polish: editorial real-estate look, clearer hierarchy */
-    body { background: #f3f5f8; color: #172033; }
-    .brand-header { position: relative; overflow: hidden; padding: 24px 20px 22px; background: linear-gradient(115deg,#0c172b 0%,#172744 58%,#0c172b 100%); }
-    .brand-header::after { content: ''; position: absolute; width: 280px; height: 280px; border: 1px solid rgba(214,184,105,.18); border-radius: 50%; right: -90px; top: -170px; box-shadow: 0 0 0 28px rgba(214,184,105,.035),0 0 0 58px rgba(214,184,105,.025); pointer-events: none; }
-    .brand-logo { letter-spacing: 3.5px; color: #d7bd79; }
-    .brand-name { letter-spacing: 2.5px; font-size: 30px; }
-    .brand-tagline { letter-spacing: 1.8px; }
-    .photo-hero { margin-top: 28px; border-radius: 20px; aspect-ratio: 16/7; box-shadow: 0 18px 45px rgba(16,27,50,.13); }
-    .thumb-row { gap: 10px; margin-top: 10px; }
-    .thumb { border-radius: 12px; }
-    .body { padding-bottom: 130px; }
-    .title-block { padding: 30px 0 22px; }
-    .badge { border-radius: 999px; padding: 6px 12px; }
-    .badge-status { font-size: 11px; }
-    .prop-title { letter-spacing: -.7px; }
-    .prop-location { font-size: 15px; }
-    .price-block { position: relative; overflow: hidden; border-radius: 18px; padding: 24px 26px; box-shadow: 0 10px 28px rgba(16,27,50,.055); }
-    .price-block::after { content: '₹'; position: absolute; right: 22px; top: -22px; font-size: 118px; line-height: 1; font-weight: 900; color: rgba(185,149,59,.07); pointer-events: none; }
-    .price-value { position: relative; z-index: 1; }
-    .section { margin: 32px 0; }
-    .section-title { font-size: 12px; letter-spacing: 1.8px; margin-bottom: 16px; }
-    .detail-grid { gap: 12px; }
-    .drow { min-height: 78px; border-radius: 14px; padding: 16px; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
-    .drow:hover { transform: translateY(-2px); border-color: #d7c48d; box-shadow: 0 8px 20px rgba(16,27,50,.06); }
-    .dicon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; background: #f7f3e8; border-radius: 10px; font-size: 17px; }
-    .dlabel { letter-spacing: .85px; }
-    .dval { font-size: 14px; }
-    .chip { border-radius: 999px; padding: 8px 13px; }
-    .chip.gold { background: #f8f2e3; }
-    .possession-banner { border-radius: 14px; padding: 18px 20px; }
-    .doc-item { border-radius: 12px; }
-    .footer { background: linear-gradient(to top,rgba(243,245,248,1) 70%,rgba(243,245,248,0)); }
-    .cta-btn { border-radius: 12px; min-height: 54px; }
-    .expiry-bar { color: #80621c; }
-    @media (min-width: 761px) {
-      .photo-hero { max-height: 510px; }
-      .body { display: grid; grid-template-columns: minmax(0,1fr); }
-      .title-block { padding-top: 32px; }
-      .price-block { max-width: 100%; }
-      .detail-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+    /* WhatsApp CTA */
+    .cta-wrap{
+      position:fixed;bottom:0;left:0;right:0;z-index:50;
+      background:linear-gradient(to top,var(--bg) 65%,transparent);
+      padding:20px 16px max(16px,env(safe-area-inset-bottom,16px));
     }
-    @media (max-width: 760px) {
-      .brand-name { font-size: 24px; }
-      .photo-hero { margin-top: 0; }
-      .body { padding-bottom: 120px; }
-      .title-block { padding-top: 24px; }
-      .price-block { margin: 18px 0; }
-      .section { margin: 26px 0; }
-      .drow { min-height: 72px; }
+    .cta-btn{
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      background:var(--wa);color:#fff;text-decoration:none;
+      font-size:15px;font-weight:800;letter-spacing:.2px;
+      border-radius:16px;padding:17px 24px;max-width:680px;margin:0 auto;
+      box-shadow:0 6px 24px rgba(37,211,102,.35);
+      transition:transform .15s,box-shadow .15s;
     }
+    .cta-btn:active{transform:scale(.98);box-shadow:0 2px 10px rgba(37,211,102,.3)}
+    .cta-icon{font-size:22px;line-height:1}
+    .cta-no-phone{text-align:center;color:var(--muted);font-size:13px;max-width:680px;margin:0 auto}
+
+    /* Expiry notice */
+    .expiry{
+      max-width:720px;margin:16px auto 0;padding:10px 16px;
+      display:flex;align-items:center;justify-content:center;gap:7px;
+      background:var(--surface);border:1px solid var(--border);border-radius:12px;
+      font-size:11px;color:var(--muted);font-weight:600;
+    }
+
+    /* Lightbox */
+    #lb{
+      display:none;position:fixed;inset:0;z-index:9999;
+      background:rgba(0,0,0,.97);flex-direction:column;
+      align-items:center;justify-content:center;
+    }
+    #lb.open{display:flex}
+    .lb-header{
+      position:absolute;top:0;left:0;right:0;
+      padding:max(16px,env(safe-area-inset-top,16px)) 16px 16px;
+      display:flex;align-items:center;justify-content:space-between;
+      background:linear-gradient(to bottom,rgba(0,0,0,.8),transparent);
+    }
+    .lb-count{color:#e5e7eb;font-size:13px;font-weight:700}
+    .lb-close{
+      width:36px;height:36px;border-radius:50%;
+      background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;color:#fff;font-size:16px;
+    }
+    #lb-img{max-width:94vw;max-height:78vh;object-fit:contain;border-radius:8px;user-select:none}
+    .lb-arrow{
+      position:absolute;top:50%;transform:translateY(-50%);
+      width:40px;height:40px;border-radius:50%;
+      background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;color:#fff;font-size:22px;z-index:10;
+    }
+    #lb-prev{left:10px}#lb-next{right:10px}
+    .lb-arrow.disabled{opacity:.3;pointer-events:none}
   </style>
 </head>
 <body>
-  <!-- Brand Header -->
-  <div class="brand-header">
-    <div class="brand-logo">Real Estate</div>
-    <div class="brand-name">KIN PROPERTY</div>
-    <div class="brand-tagline">YOUR PROPERTY, OUR TRUST</div>
+
+  <!-- ── Header ── -->
+  <div class="header">
+    <div class="header-inner">
+      <div class="header-eyebrow">Real Estate</div>
+      <div class="header-logo">KIN PROPERTY</div>
+      <div class="header-tagline">Your Property · Our Trust</div>
+    </div>
+    <div class="header-divider"></div>
   </div>
 
-  <!-- Photos -->
-  ${photosHTML}
+  <!-- ── Gallery ── -->
+  ${galleryHTML}
 
-  <div class="body">
-    <!-- Title Block -->
-    <div class="title-block">
-      <div class="badges">
-        <span class="badge badge-status">● ${statusLabel}</span>
-        <span class="badge badge-listing">${p.listingType || 'Sale'}</span>
-        ${p.propertyType ? `<span class="badge badge-type">${p.propertyType}</span>` : ''}
-        ${p.flatConfig ? `<span class="badge badge-type">${p.flatConfig}</span>` : ''}
-      </div>
-      <div class="prop-title">${p.projectName}</div>
-      <div class="prop-location">📍 ${p.location}</div>
-      ${p.nearbyLocalities ? `<div style="color:#6b7280;font-size:12px;margin-top:-8px;margin-bottom:8px">Near: ${p.nearbyLocalities}</div>` : ''}
+  <!-- ── Content ── -->
+  <div class="content">
+
+    <!-- Tags -->
+    <div class="tags">
+      <span class="tag tag-status">● ${statusLabel}</span>
+      <span class="tag tag-listing">${isRent ? 'For Rent' : 'For Sale'}</span>
+      ${p.propertyType ? `<span class="tag tag-type">${p.propertyType}</span>` : ''}
+      ${p.flatConfig   ? `<span class="tag tag-type">${p.flatConfig}</span>`   : ''}
     </div>
 
-    <!-- Price Block -->
-    <div class="price-block">
-      <div class="price-label">${isRent ? 'Monthly Rent' : 'Sale Price'}</div>
-      <div class="price-value">${priceDisplay || '—'}</div>
+    <!-- Location -->
+    <div class="loc-card">
+      <div class="loc-icon">📍</div>
+      <div>
+        <div class="loc-name">${p.location || '—'}</div>
+        ${p.nearbyLocalities ? `<div class="loc-nearby">Near: ${p.nearbyLocalities}</div>` : ''}
+      </div>
+    </div>
+
+    <!-- Price -->
+    <div class="price-card">
+      <div class="price-eyebrow">${isRent ? 'Monthly Rent' : 'Sale Price'}</div>
+      <div class="price-main">${priceDisplay || '—'}</div>
       ${p.maintenance ? `<div class="price-sub">+ ₹${p.maintenance}/mo maintenance</div>` : ''}
       ${isRent && (p.securityDeposit || p.monthlyRent) ? `
-      <div class="price-row">
-        ${p.monthlyRent ? `<div class="price-item"><div class="price-item-label">Monthly Rent</div><div class="price-item-val">₹${Number(String(p.monthlyRent).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
-        ${p.securityDeposit ? `<div class="price-item"><div class="price-item-label">Security Deposit</div><div class="price-item-val">₹${Number(String(p.securityDeposit).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
+      <div class="price-pills">
+        ${p.monthlyRent    ? `<div class="price-pill"><div class="price-pill-label">Monthly Rent</div><div class="price-pill-val">₹${Number(String(p.monthlyRent).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
+        ${p.securityDeposit ? `<div class="price-pill"><div class="price-pill-label">Security Deposit</div><div class="price-pill-val">₹${Number(String(p.securityDeposit).replace(/,/g,'')||0).toLocaleString('en-IN')}</div></div>` : ''}
       </div>` : ''}
     </div>
 
     <!-- Possession -->
     ${p.possession ? `
-    <div class="section">
-      <div class="${p.possession === 'Ready to Move' ? 'possession-banner' : 'possession-banner possession-uc'}">
-        <div class="possession-icon">${p.possession === 'Ready to Move' ? '✅' : '🏗️'}</div>
-        <div>
-          <div class="possession-title">${p.possession}</div>
-          ${p.possessionDate ? `<div class="possession-sub">Expected: ${p.possessionDate}</div>` : ''}
-        </div>
+    <div class="poss-banner ${p.possession === 'Ready to Move' ? 'rtm' : 'uc'}">
+      <div class="poss-icon">${p.possession === 'Ready to Move' ? '✅' : '🏗️'}</div>
+      <div>
+        <div class="poss-title">${p.possession}</div>
+        ${p.possessionDate ? `<div class="poss-sub">Expected: ${p.possessionDate}</div>` : ''}
       </div>
     </div>` : ''}
 
-    <!-- Key Details -->
+    <!-- Property Details -->
     <div class="section">
-      <div class="section-title">Property Details</div>
-      <div class="detail-grid">
-        ${row('🏠', 'Property Type', p.propertyType)}
-        ${row('📐', 'Carpet Area', p.carpetArea)}
-        ${row('📏', 'Buildup Area', p.buildupArea)}
-        ${row('🏢', 'Floor', p.floor)}
-        ${row('🏗️', 'Total Floors', p.totalFloors)}
-        ${row('🧭', 'Facing', p.facing)}
-        ${row('🛗', 'Lift', p.lift)}
-        ${row('🚗', 'Parking', p.parking)}
-        ${row('💧', 'Water Source', p.water)}
-        ${row('✅', 'Sanction', p.sanction)}
-        ${row('🏡', 'Furnishing', p.furnishing)}
-        ${row('📅', 'Property Age', p.propertyAge)}
-        ${p.wings ? row('🏘️', 'Wings', p.wings) : ''}
-        ${p.flatsOnFloor ? row('🔢', 'Flats on Floor', p.flatsOnFloor) : ''}
+      <div class="section-head"><div class="section-head-label">Property Details</div><div class="section-head-line"></div></div>
+      <div class="dc-grid">
+        ${card('🏠','Type', p.propertyType)}
+        ${card('📐','Carpet Area', p.carpetArea)}
+        ${card('📏','Buildup Area', p.buildupArea)}
+        ${card('🏗️','Total Floors', p.totalFloors)}
+        ${card('🧭','Facing', p.facing)}
+        ${card('🛗','Lift', p.lift)}
+        ${card('🚗','Parking', p.parking)}
+        ${card('💧','Water', p.water)}
+        ${card('✅','Sanction', p.sanction)}
+        ${card('🛋️','Furnishing', p.furnishing)}
+        ${card('📅','Property Age', p.propertyAge)}
+        ${p.flatsOnFloor ? card('🔢','Flats/Floor', p.flatsOnFloor) : ''}
       </div>
     </div>
 
     <!-- Amenities -->
     ${p.amenities && p.amenities.length ? `
     <div class="section">
-      <div class="section-title">Amenities</div>
-      <div class="chip-list">
-        ${p.amenities.map(a => `<span class="chip gold">✦ ${a}</span>`).join('')}
+      <div class="section-head"><div class="section-head-label">Amenities</div><div class="section-head-line"></div></div>
+      <div class="amenity-list">
+        ${p.amenities.map(a => `<div class="amenity-chip"><div class="amenity-chip-dot"></div>${a}</div>`).join('')}
       </div>
     </div>` : ''}
 
-    <!-- Documents Available -->
+    <!-- Documents -->
     ${p.documents && p.documents.length ? `
     <div class="section">
-      <div class="section-title">Documents Available</div>
-      <div style="display:flex;flex-direction:column;gap:7px;">
-        ${p.documents.map(d => `<div class="doc-item">📄 ${d}</div>`).join('')}
+      <div class="section-head"><div class="section-head-label">Documents Available</div><div class="section-head-line"></div></div>
+      <div class="doc-list">
+        ${p.documents.map(d => `<div class="doc-item"><div class="doc-item-icon">📄</div>${d}</div>`).join('')}
       </div>
     </div>` : ''}
 
     <!-- Notes -->
     ${p.notes ? `
     <div class="section">
-      <div class="section-title">Additional Info</div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;font-size:14px;color:var(--muted);line-height:1.6;">${p.notes}</div>
+      <div class="section-head"><div class="section-head-label">Additional Info</div><div class="section-head-line"></div></div>
+      <div class="notes-box">${p.notes}</div>
     </div>` : ''}
 
-    <!-- Map Link -->
-    ${p.gmapsLink ? `
-    <div class="section">
-      <a href="${p.gmapsLink}" target="_blank" style="display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid rgba(66,133,244,0.3);border-radius:12px;padding:14px 16px;text-decoration:none;color:var(--text);">
-        <span style="font-size:22px">🗺️</span>
-        <div><div style="font-size:13px;font-weight:700;color:#60a5fa;">View on Google Maps</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">Tap to open in Maps app</div></div>
-        <span style="margin-left:auto;color:#60a5fa;">→</span>
-      </a>
-    </div>` : ''}
+    <!-- Expiry -->
+    ${req.params.token ? `<div class="expiry">🔗 This link is valid for 48 hours</div>` : ''}
 
-  </div><!-- /body -->
+  </div><!-- /content -->
 
-  <!-- Footer CTA -->
-  <div class="footer">
+  <!-- ── WhatsApp CTA ── -->
+  <div class="cta-wrap">
     ${p.ownerPhone
-      ? `<a class="cta-btn" href="https://wa.me/91${p.ownerPhone.replace(/\D/g,'')}?text=${encodeURIComponent(`Hi, I'm interested in the property at ${p.projectName}, ${p.location}. Can you share more details?`)}">
-          <span style="font-size:20px">💬</span> Contact on WhatsApp
+      ? `<a class="cta-btn" href="https://wa.me/91${p.ownerPhone.replace(/\D/g,'')}?text=${encodeURIComponent(`Hi, I'm interested in the property at ${p.location}. Can you share more details?`)}">
+          <span class="cta-icon">💬</span> Contact on WhatsApp
         </a>`
-      : `<div style="text-align:center;color:var(--muted);font-size:13px;">Contact your agent for more info</div>`}
+      : `<div class="cta-no-phone">Contact your agent for more details</div>`}
   </div>
 
-  <!-- Expiry bar -->
-  ${req.params.token ? `<div class="expiry-bar" style="padding-bottom:80px;">🔗 This link expires in 24 hours</div>` : ''}
-
-  <!-- Lightbox -->
+  <!-- ── Lightbox ── -->
   <div id="lb">
-    <div class="lb-bar">
+    <div class="lb-header">
       <div class="lb-close" onclick="closeLb()">✕</div>
-      <div class="lb-counter" id="lbCount">1 / ${photos.length}</div>
-      <div style="width:38px"></div>
+      <div class="lb-count" id="lbCount"></div>
+      <div style="width:36px"></div>
     </div>
-    <img id="lb-img" src="" alt="">
-    ${photos.length > 1 ? `<div class="lb-nav" id="lb-prev" onclick="navLb(-1)">‹</div><div class="lb-nav" id="lb-next" onclick="navLb(1)">›</div>` : ''}
+    <img id="lb-img" src="" alt="Property photo">
+    ${photos.length > 1 ? `
+    <div class="lb-arrow" id="lb-prev" onclick="navLb(-1)">‹</div>
+    <div class="lb-arrow" id="lb-next" onclick="navLb(1)">›</div>` : ''}
   </div>
 
   <script>
-    const photos = ${lbPhotos};
+    const PHOTOS = ${lbPhotos};
     let cur = 0;
+    function updLb() {
+      document.getElementById('lb-img').src = PHOTOS[cur];
+      document.getElementById('lbCount').textContent = PHOTOS.length ? (cur+1) + ' / ' + PHOTOS.length : '';
+      const prev = document.getElementById('lb-prev');
+      const next = document.getElementById('lb-next');
+      if (prev) prev.classList.toggle('disabled', cur <= 0);
+      if (next) next.classList.toggle('disabled', cur >= PHOTOS.length - 1);
+    }
     function openLb(i) {
-      cur = i; document.getElementById('lb-img').src = photos[i];
-      document.getElementById('lbCount').textContent = (i+1) + ' / ' + photos.length;
+      cur = i; updLb();
       document.getElementById('lb').classList.add('open');
       document.body.style.overflow = 'hidden';
     }
@@ -738,19 +823,21 @@ exports.getGalleryPage = async (req, res) => {
       document.body.style.overflow = '';
     }
     function navLb(d) {
-      cur = (cur + d + photos.length) % photos.length;
-      document.getElementById('lb-img').src = photos[cur];
-      document.getElementById('lbCount').textContent = (cur+1) + ' / ' + photos.length;
+      const n = cur + d;
+      if (n >= 0 && n < PHOTOS.length) { cur = n; updLb(); }
     }
-    document.getElementById('lb').addEventListener('click', function(e) {
-      if (e.target === this) closeLb();
-    });
-    // Swipe
+    document.getElementById('lb').addEventListener('click', e => { if (e.target === document.getElementById('lb')) closeLb(); });
     let sx = 0;
     document.getElementById('lb').addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive: true });
     document.getElementById('lb').addEventListener('touchend', e => {
       const dx = e.changedTouches[0].clientX - sx;
-      if (Math.abs(dx) > 50 && photos.length > 1) navLb(dx < 0 ? 1 : -1);
+      if (Math.abs(dx) > 45 && PHOTOS.length > 1) navLb(dx < 0 ? 1 : -1);
+    });
+    document.addEventListener('keydown', e => {
+      if (!document.getElementById('lb').classList.contains('open')) return;
+      if (e.key === 'ArrowLeft') navLb(-1);
+      if (e.key === 'ArrowRight') navLb(1);
+      if (e.key === 'Escape') closeLb();
     });
   </script>
 </body>
