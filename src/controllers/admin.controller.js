@@ -406,6 +406,11 @@ exports.getAllLeads = asyncHandler(async (req, res) => {
   // Status filter
   if (status) filter.status = status;
 
+  // ?all=true -> every lead, all statuses mixed (admin Leads "All" tab).
+  // Soft-deleted leads stay in Archive, so they are left out here.
+  const allMode = req.query.all === 'true';
+  if (allMode && !status) filter.status = { $ne: 'Deleted' };
+
   // Employee filter
   if (employee) filter.assignedTo = employee;
 
@@ -471,7 +476,7 @@ exports.getAllLeads = asyncHandler(async (req, res) => {
   // searching/filtering. Older leads remain stored and reachable via search,
   // status, employee, or an explicit date/month/year range.
   const hasExplicitScope =
-    search || status || employee || dateFrom || dateTo || month || year;
+    allMode || search || status || employee || dateFrom || dateTo || month || year;
   if (!hasExplicitScope && !filter.createdAt) {
     filter.createdAt = { $gte: startOfDaysAgo(30) };
   }
