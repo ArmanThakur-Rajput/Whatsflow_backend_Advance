@@ -2,6 +2,8 @@ const Property = require('../models/Property.model');
 const PropertyMasterData = require('../models/PropertyMasterData.model');
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // ─── Cloudflare R2 client ──────────────────────────────────────────────────────
 const r2 = new S3Client({
@@ -344,7 +346,90 @@ exports.createShareLink = async (req, res) => {
 
 // GET /api/property-crm/share/:token  — public, no auth, full property details page
 // Also keeps backward-compat: GET /api/property-crm/properties/:id/gallery
+//
+// The page itself is a React + TypeScript app, pre-built into
+// propertyShare.template.html (same folder as this controller). The server only
+// prepares the property data and injects it as JSON into the template.
 const AGENT_PHONE = '7498366577'; // 10-digit, bina +91
+const SHARE_TEMPLATE_PATH = path.join(__dirname, 'propertyShare.template.html');
+let shareTemplateCache = null;
+const getShareTemplate = () => {
+  if (!shareTemplateCache) shareTemplateCache = fs.readFileSync(SHARE_TEMPLATE_PATH, 'utf8');
+  return shareTemplateCache;
+};
+
+const EXPIRED_PAGE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#f3f6fd;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.card{background:#fff;border-radius:20px;padding:48px 36px;text-align:center;max-width:380px;width:90%;box-shadow:0 6px 30px rgba(15,30,80,.08)}.icon{margin-bottom:20px}.icon svg{width:56px;height:56px;fill:none;stroke:#1457f5;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.title{font-size:22px;font-weight:800;color:#0e1a3a;margin-bottom:10px}.sub{font-size:14px;color:#6b7690;line-height:1.6}</style></head><body><div class="card"><div class="icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><div class="title">Link Expired</div><div class="sub">This property link was valid for 48 hours and has expired.<br><br>Ask the agent to send you a fresh link.</div></div></body></html>`;
+
+const escHtml = (v) => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const toNum = (v) => {
+  const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.]/g, ''));
+  return isNaN(n) ? 0 : n;
+};
+const fmtPrice = (v) => {
+  const n = toNum(v);
+  if (!n) return v ? String(v) : '';
+  const trim = (x) => x.toFixed(2).replace(/\.?0+$/, '');
+  if (n >= 10000000) return '₹' + trim(n / 10000000) + ' Cr';
+  if (n >= 100000) return '₹' + trim(n / 100000) + ' Lakh';
+  return '₹' + n.toLocaleString('en-IN');
+};
+const fmtSqft = (v) => {
+  if (!v) return '';
+  const s = String(v).trim();
+  return /[a-z]/i.test(s) ? s : s + ' sq.ft';
+};
+
+function buildSharePayload(p, isShareLink) {
+  const isRent = p.listingType === 'Rent';
+  const priceMain = isRent
+    ? (p.monthlyRent ? '₹' + toNum(p.monthlyRent).toLocaleString('en-IN') + '/mo' : fmtPrice(p.price))
+    : fmtPrice(p.price);
+  let perSqft = '';
+  if (!isRent && toNum(p.price) && toNum(p.buildupArea)) {
+    perSqft = '₹' + Math.round(toNum(p.price) / toNum(p.buildupArea)).toLocaleString('en-IN') + ' per sq.ft (Approx.)';
+  }
+  // [icon key, label, value]
+  const details = [
+    ['home', 'Type', p.flatConfig || p.bhk || p.propertyType],
+    ['ruler', 'Carpet Area', fmtSqft(p.carpetArea)],
+    ['expand', 'Built-up Area', fmtSqft(p.buildupArea)],
+    ['building', 'Total Floors', p.totalFloors],
+    ['compass', 'Facing', p.facing],
+    ['lift', 'Lift', p.lift],
+    ['parking', 'Parking', p.parking],
+    ['drop', 'Water Supply', p.water],
+    ['grid', 'Flats / Floor', p.flatsOnFloor],
+    ['sofa', 'Furnishing', p.furnishing],
+    ['calendar', 'Property Age', p.propertyAge],
+    ['key', 'Possession', p.possession],
+    ['filecheck', 'Sanction', p.sanction],
+    ['layers', 'Floor', p.floor],
+  ].filter((d) => d[2] != null && String(d[2]).trim() !== '').map((d) => [d[0], d[1], String(d[2])]);
+
+  const address = [p.address, p.location].filter(Boolean).join(', ')
+    + (p.nearbyLocalities ? ' · Near ' + p.nearbyLocalities : '');
+
+  return {
+    projectName: p.projectName || p.society || '',
+    flatConfig: p.flatConfig || p.bhk || '',
+    address,
+    statusLabel: p.status === 'sold' ? 'Sold' : p.status === 'rented' ? 'Rented' : '',
+    priceLabel: isRent ? 'MONTHLY RENT' : 'SALE PRICE',
+    priceMain,
+    perSqft,
+    maintenance: p.maintenance ? String(p.maintenance) : '',
+    deposit: isRent && p.securityDeposit ? '₹' + toNum(p.securityDeposit).toLocaleString('en-IN') : '',
+    details,
+    amenities: (p.amenities || []).filter(Boolean).map(String),
+    photos: (p.photos || []).filter(Boolean),
+    documents: (p.documents || []).filter(Boolean).map(String),
+    notes: p.notes ? String(p.notes) : '',
+    expiring: !!isShareLink,
+    agentPhone: AGENT_PHONE,
+  };
+}
 
 exports.getGalleryPage = async (req, res) => {
   try {
@@ -354,309 +439,29 @@ exports.getGalleryPage = async (req, res) => {
         shareToken: req.params.token,
         shareTokenExpiry: { $gt: new Date() },
       });
-      if (!property) {
-        return res.status(410).send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>*{box-sizing:border-box;margin:0;padding:0}body{background:#f3f6fd;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.card{background:#fff;border-radius:20px;padding:48px 36px;text-align:center;max-width:380px;width:90%;box-shadow:0 6px 30px rgba(15,30,80,.08)}.icon{font-size:56px;margin-bottom:20px}.title{font-size:22px;font-weight:800;color:#0e1a3a;margin-bottom:10px}.sub{font-size:14px;color:#6b7690;line-height:1.6}</style></head><body><div class="card"><div class="icon">⏰</div><div class="title">Link Expired</div><div class="sub">This property link was valid for 48 hours and has expired.<br><br>Ask the agent to send you a fresh link.</div></div></body></html>`);
-      }
+      if (!property) return res.status(410).send(EXPIRED_PAGE);
     } else {
       property = await Property.findById(req.params.id);
       if (!property) return res.status(404).send('Property not found');
     }
 
     const p = property.toObject ? property.toObject() : property;
-    const photos = (p.photos || []).filter(Boolean);
-    const isRent = p.listingType === 'Rent';
+    const payload = buildSharePayload(p, !!req.params.token);
 
-    // ── helpers ──────────────────────────────────────────────────────────────
-    const esc = (v) => String(v == null ? '' : v)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    const num = (v) => {
-      const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.]/g, ''));
-      return isNaN(n) ? 0 : n;
-    };
-    const fmtPrice = (v) => {
-      const n = num(v);
-      if (!n) return v ? esc(v) : '';
-      const trim = (x) => x.toFixed(2).replace(/\.?0+$/, '');
-      if (n >= 10000000) return '₹' + trim(n / 10000000) + ' Cr';
-      if (n >= 100000) return '₹' + trim(n / 100000) + ' Lakh';
-      return '₹' + n.toLocaleString('en-IN');
-    };
-    const sqft = (v) => {
-      if (!v) return '';
-      const s = String(v).trim();
-      return /[a-z]/i.test(s) ? esc(s) : esc(s) + ' sq.ft';
-    };
+    // JSON is injected inside a <script>, so escape anything that could close it.
+    const json = JSON.stringify(payload)
+      .replace(/</g, '\\u003c')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029');
 
-    const priceMain = isRent
-      ? (p.monthlyRent ? '₹' + num(p.monthlyRent).toLocaleString('en-IN') + '/mo' : fmtPrice(p.price))
-      : fmtPrice(p.price);
-
-    let perSqft = '';
-    if (!isRent && num(p.price) && num(p.buildupArea)) {
-      perSqft = '₹' + Math.round(num(p.price) / num(p.buildupArea)).toLocaleString('en-IN') + ' per sq.ft (Approx.)';
-    }
-
-    // ── Detail tiles (icon emoji + pastel colour) ────────────────────────────
-    const details = [
-      ['🏠', '#e6f0ff', 'Type', esc(p.flatConfig || p.propertyType)],
-      ['📐', '#e3f7ea', 'Carpet Area', sqft(p.carpetArea)],
-      ['📏', '#fff0dc', 'Built-up Area', sqft(p.buildupArea)],
-      ['🏢', '#efe6ff', 'Total Floors', esc(p.totalFloors)],
-      ['🧭', '#fff0dc', 'Facing', esc(p.facing)],
-      ['🛗', '#efe6ff', 'Lift', esc(p.lift)],
-      ['🅿️', '#ffe6ec', 'Parking', esc(p.parking)],
-      ['💧', '#e3f7ea', 'Water Supply', esc(p.water)],
-      ['🏬', '#fff6d6', 'Flats / Floor', esc(p.flatsOnFloor)],
-      ['🛋️', '#efe6ff', 'Furnishing', esc(p.furnishing)],
-      ['🗓️', '#fff0dc', 'Property Age', esc(p.propertyAge)],
-      ['🔑', '#ffe6ec', 'Possession', esc(p.possession)],
-      ['📜', '#e6f0ff', 'Sanction', esc(p.sanction)],
-      ['🧱', '#e3f7ea', 'Floor', esc(p.floor)],
-    ].filter((d) => d[3]);
-
-    const detailsHTML = details.map((d) =>
-      `<div class="dt"><div class="dt-ic" style="background:${d[1]}">${d[0]}</div><div class="dt-tx"><div class="dt-l">${d[2]}</div><div class="dt-v">${d[3]}</div></div></div>`
-    ).join('');
-
-    // ── Amenities (keyword → emoji + tint) ───────────────────────────────────
-    const AM = [
-      [/pool|swim/i, '🏊', '#e3f2ff'], [/gym|fitness/i, '🏋️', '#e3f7ea'],
-      [/club/i, '🏡', '#efe6ff'], [/backup|power|generator/i, '⚡', '#fff6d6'],
-      [/cctv|camera|surveil/i, '📹', '#ffe6ec'], [/secur|guard/i, '🛡️', '#e3f2ff'],
-      [/garden|park\b|green/i, '🌿', '#e3f7ea'], [/kid|play|child/i, '🎠', '#ffe6ec'],
-      [/visitor/i, '🚗', '#fff0dc'], [/lift|elevator/i, '🛗', '#efe6ff'],
-      [/parking/i, '🅿️', '#fff0dc'], [/water/i, '💧', '#e3f2ff'],
-      [/garbage|waste/i, '♻️', '#e3f7ea'], [/temple|pooja/i, '🛕', '#fff0dc'],
-      [/jog|track/i, '🏃', '#e3f7ea'], [/court|sport|tennis|badminton/i, '🏸', '#e3f2ff'],
-    ];
-    const amenitiesHTML = (p.amenities || []).map((a) => {
-      const m = AM.find((x) => x[0].test(a));
-      return `<div class="am" style="background:${m ? m[2] : '#eef2fb'}"><div class="am-ic">${m ? m[1] : '✔️'}</div><div class="am-l">${esc(a)}</div></div>`;
-    }).join('');
-
-    // ── Gallery ──────────────────────────────────────────────────────────────
-    const thumbsShown = photos.slice(0, 5);
-    const extra = photos.length - 5;
-    const thumbsHTML = thumbsShown.map((u, i) => {
-      const more = i === 4 && extra > 0;
-      return `<div class="th${i === 0 ? ' on' : ''}" data-i="${i}"><img src="${esc(u)}" alt="" loading="lazy">${more ? `<div class="th-more">+${extra}</div>` : ''}</div>`;
-    }).join('');
-
-    const galleryHTML = photos.length ? `
-      <div class="hero" id="hero">
-        <img id="hero-img" src="${esc(photos[0])}" alt="Property photo">
-        <div class="cnt" id="cnt">1 / ${photos.length}</div>
-        ${photos.length > 1 ? `<button class="ar l" id="prev" aria-label="Previous">&#8249;</button><button class="ar r" id="next" aria-label="Next">&#8250;</button>` : ''}
-      </div>
-      ${photos.length > 1 ? `<div class="thumbs">${thumbsHTML}</div>` : ''}`
-      : `<div class="hero nophoto"><div>🏢<br><span>No photos available</span></div></div>`;
-
-    const waText = encodeURIComponent(`Hi, I'm interested in "${p.projectName || p.society || 'your property'}"${p.location ? ' at ' + p.location : ''}. Can you share more details?`);
-    const waLink = `https://wa.me/91${AGENT_PHONE}?text=${waText}`;
-    const telLink = `tel:+91${AGENT_PHONE}`;
-    const statusLabel = p.status === 'sold' ? 'Sold' : p.status === 'rented' ? 'Rented' : '';
+    // split/join (not String.replace) so "$" in data is never treated as a pattern
+    const html = getShareTemplate()
+      .split('__TITLE__').join(escHtml(payload.projectName || 'Property'))
+      .split('__PROPERTY_JSON__').join(json);
 
     res.setHeader('Content-Security-Policy', "default-src 'none'; img-src * data:; style-src 'unsafe-inline' https://fonts.googleapis.com; script-src 'unsafe-inline'; font-src https://fonts.gstatic.com; connect-src 'none';");
-    res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b1530">
-<title>${esc(p.projectName || 'Property')} | Kin Property Management</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{--navy:#0b1530;--gold:#f5c542;--blue:#1457f5;--bg:#f3f6fd;--ink:#0e1a3a;--mute:#6b7690;--line:#e6ebf5}
-html{-webkit-tap-highlight-color:transparent}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);line-height:1.4;padding-bottom:110px}
-.wrap{max-width:560px;margin:0 auto}
-
-/* header */
-.top{background:var(--navy);padding:calc(env(safe-area-inset-top,0px) + 16px) 16px 14px;text-align:center}
-.top h1{font-size:19px;font-weight:700;color:#fff;letter-spacing:-.2px}
-.top h1 b{color:var(--gold);font-weight:700}
-
-/* gallery */
-.gal{padding:10px 10px 0}
-.hero{position:relative;border-radius:22px;overflow:hidden;aspect-ratio:16/9.6;background:#d7dde9;touch-action:pan-y}
-.hero img{width:100%;height:100%;object-fit:cover;display:block}
-.hero.nophoto{display:flex;align-items:center;justify-content:center;text-align:center;font-size:44px;color:#9aa6bf}
-.hero.nophoto span{font-size:13px;font-weight:600}
-.cnt{position:absolute;top:14px;right:14px;background:rgba(20,26,45,.62);color:#fff;font-size:13px;font-weight:600;padding:6px 12px;border-radius:999px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
-.ar{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:0;background:#fff;color:var(--ink);font-size:28px;line-height:1;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 10px rgba(0,0,0,.18);cursor:pointer;padding-bottom:4px}
-.ar.l{left:12px}.ar.r{right:12px}
-.thumbs{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-top:10px}
-.th{position:relative;aspect-ratio:1/.85;border-radius:12px;overflow:hidden;cursor:pointer;background:#d7dde9;border:2px solid transparent}
-.th.on{border-color:var(--blue);box-shadow:0 0 0 2px rgba(20,87,245,.18)}
-.th img{width:100%;height:100%;object-fit:cover;display:block}
-.th-more{position:absolute;inset:0;background:rgba(20,26,45,.6);color:#fff;font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center}
-
-/* title */
-.title{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 14px 0}
-.title h2{font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.15}
-.pill{background:#e9eef9;color:var(--ink);font-weight:600;font-size:14px;padding:9px 16px;border-radius:999px;white-space:nowrap}
-.addr{padding:6px 14px 0;font-size:13px;color:var(--mute);font-weight:500}
-.stat{margin:10px 14px 0;display:inline-block;background:#ffe9e9;color:#c62828;font-weight:700;font-size:12px;padding:5px 12px;border-radius:999px}
-
-/* price */
-.price{margin:14px 10px 0;border-radius:20px;padding:16px 20px 16px;background:linear-gradient(120deg,#e6edfb 0%,#dfe8fb 55%,#e9effc 100%)}
-.price .l{font-size:14px;font-weight:600;color:#56627f}
-.price .v{font-size:36px;font-weight:800;letter-spacing:-1px;margin-top:2px}
-.price .s{font-size:15px;color:#6b7690;margin-top:4px;font-weight:500}
-.price .dep{display:flex;gap:10px;margin-top:12px}
-.price .dep div{flex:1;background:rgba(255,255,255,.65);border-radius:12px;padding:10px 12px}
-.price .dep small{display:block;font-size:11px;color:var(--mute);font-weight:600}
-.price .dep b{font-size:16px;font-weight:800}
-
-/* cards */
-.card{background:#fff;border-radius:20px;margin:12px 10px 0;padding:14px 12px 14px;box-shadow:0 2px 14px rgba(20,40,100,.05)}
-.card h3{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:700;margin:0 4px 12px}
-.card h3 i{font-style:normal;width:34px;height:34px;border-radius:10px;background:#fff1de;display:flex;align-items:center;justify-content:center;font-size:18px}
-.dgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.dt{background:#f8faff;border:1px solid var(--line);border-radius:14px;padding:10px 8px;display:flex;align-items:center;gap:8px;min-width:0}
-.dt-ic{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
-.dt-tx{min-width:0}
-.dt-l{font-size:11.5px;color:var(--mute);font-weight:500}
-.dt-v{font-size:13.5px;font-weight:700;line-height:1.2;overflow-wrap:anywhere}
-.agrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.am{border-radius:12px;padding:12px 6px 10px;text-align:center;min-width:0}
-.am-ic{font-size:24px;line-height:1.1}
-.am-l{font-size:12.5px;font-weight:500;margin-top:6px;overflow-wrap:anywhere}
-.docs{display:flex;flex-direction:column;gap:7px}
-.doc{background:#f8faff;border:1px solid var(--line);border-radius:12px;padding:11px 14px;font-size:13.5px;font-weight:600}
-.notes{font-size:14px;color:#374151;line-height:1.7;padding:0 4px;white-space:pre-line}
-.exp{text-align:center;font-size:12px;color:var(--mute);font-weight:500;margin:14px 10px 0}
-
-/* contact bar */
-.bar{position:fixed;left:0;right:0;bottom:0;z-index:40;background:linear-gradient(to top,#fff 70%,rgba(255,255,255,0));padding:18px 14px max(14px,env(safe-area-inset-bottom,14px))}
-.cta{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;max-width:560px;margin:0 auto;border:0;border-radius:16px;background:var(--blue);color:#fff;font:700 18px 'Inter',sans-serif;padding:19px 20px;box-shadow:0 8px 22px rgba(20,87,245,.32);cursor:pointer}
-.cta svg{width:24px;height:24px;fill:#fff}
-.cta:active{transform:scale(.985)}
-
-/* bottom sheet */
-.ov{position:fixed;inset:0;background:rgba(10,16,35,.5);opacity:0;pointer-events:none;transition:opacity .25s;z-index:60}
-.ov.open{opacity:1;pointer-events:auto}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:70;background:#fff;border-radius:24px 24px 0 0;padding:10px 18px max(22px,env(safe-area-inset-bottom,22px));transform:translateY(105%);transition:transform .3s cubic-bezier(.2,.8,.2,1);max-width:560px;margin:0 auto}
-.sheet.open{transform:translateY(0)}
-.grab{width:44px;height:5px;border-radius:3px;background:#d5dbe8;margin:0 auto 14px}
-.sheet h4{font-size:18px;font-weight:800;text-align:center}
-.sheet p{font-size:13px;color:var(--mute);text-align:center;margin:4px 0 16px}
-.opt{display:flex;align-items:center;gap:14px;text-decoration:none;border-radius:16px;padding:15px 16px;margin-bottom:10px;font-weight:700;font-size:16px}
-.opt small{display:block;font-weight:500;font-size:12.5px;opacity:.85;margin-top:1px}
-.opt .ic{width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.opt .ic svg{width:24px;height:24px;fill:#fff}
-.opt.wa{background:#25d366;color:#fff}
-.opt.call{background:var(--navy);color:#fff}
-.cancel{display:block;width:100%;border:0;background:#eef2fb;color:var(--ink);font:600 15px 'Inter',sans-serif;padding:14px;border-radius:14px;margin-top:2px;cursor:pointer}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="top"><h1>Kin <b>Property</b> Management</h1></div>
-
-  <div class="gal">${galleryHTML}</div>
-
-  <div class="title">
-    <h2>${esc(p.projectName || p.society || '')}</h2>
-    ${(p.flatConfig || p.bhk) ? `<div class="pill">${esc(p.flatConfig || p.bhk)}</div>` : ''}
-  </div>
-  ${(p.address || p.location) ? `<div class="addr">📍 ${esc([p.address, p.location].filter(Boolean).join(', '))}${p.nearbyLocalities ? ' · Near ' + esc(p.nearbyLocalities) : ''}</div>` : ''}
-  ${statusLabel ? `<div class="stat">${statusLabel}</div>` : ''}
-
-  <div class="price">
-    <div class="l">${isRent ? 'MONTHLY RENT' : 'SALE PRICE'}</div>
-    <div class="v">${priceMain || '—'}</div>
-    ${perSqft ? `<div class="s">${perSqft}</div>` : ''}
-    ${p.maintenance ? `<div class="s">+ ₹${esc(p.maintenance)}/mo maintenance</div>` : ''}
-    ${isRent && p.securityDeposit ? `<div class="dep"><div><small>Security Deposit</small><b>₹${num(p.securityDeposit).toLocaleString('en-IN')}</b></div></div>` : ''}
-  </div>
-
-  ${detailsHTML ? `<div class="card"><h3><i>🏠</i>Property Details</h3><div class="dgrid">${detailsHTML}</div></div>` : ''}
-
-  ${amenitiesHTML ? `<div class="card"><h3><i>🏰</i>Amenities</h3><div class="agrid">${amenitiesHTML}</div></div>` : ''}
-
-  ${(p.documents && p.documents.length) ? `<div class="card"><h3><i>📄</i>Documents Available</h3><div class="docs">${p.documents.map((d) => `<div class="doc">✔ ${esc(d)}</div>`).join('')}</div></div>` : ''}
-
-  ${p.notes ? `<div class="card"><h3><i>📝</i>Additional Info</h3><div class="notes">${esc(p.notes)}</div></div>` : ''}
-
-  ${req.params.token ? `<div class="exp">🕐 This link is valid for 48 hours</div>` : ''}
-</div>
-
-<!-- Contact bar -->
-<div class="bar">
-  <button class="cta" id="open-contact" type="button">
-    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.2"/><path d="M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7z"/></svg>
-    Contact Agent
-  </button>
-</div>
-
-<div class="ov" id="ov"></div>
-<div class="sheet" id="sheet" role="dialog" aria-label="Contact agent">
-  <div class="grab"></div>
-  <h4>Contact Agent</h4>
-  <p>Kin Property Management</p>
-  <a class="opt wa" href="${waLink}" target="_blank" rel="noopener">
-    <span class="ic"><svg viewBox="0 0 24 24"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.16-.17.2-.35.22-.64.07-.3-.15-1.26-.46-2.39-1.48-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.6.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.92-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.88 1.21 3.07.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.69.63.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35zM12 21.8a9.8 9.8 0 01-5-1.37l-.36-.21-3.71.97.99-3.6-.23-.37A9.8 9.8 0 1112 21.8zM12 0C5.37 0 0 5.37 0 12c0 2.12.55 4.12 1.53 5.86L0 24l6.3-1.65A12 12 0 1012 0z"/></svg></span>
-    <span>Chat on WhatsApp<small>+91 ${AGENT_PHONE}</small></span>
-  </a>
-  <a class="opt call" href="${telLink}">
-    <span class="ic"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></span>
-    <span>Call Now<small>+91 ${AGENT_PHONE}</small></span>
-  </a>
-  <button class="cancel" id="close-contact" type="button">Cancel</button>
-</div>
-
-<script>
-(function(){
-  var PHOTOS = ${JSON.stringify(photos).replace(/</g, '\\u003c')};
-  var cur = 0;
-  var img = document.getElementById('hero-img');
-  var cnt = document.getElementById('cnt');
-  var thumbs = document.querySelectorAll('.th');
-
-  function show(i){
-    if(!PHOTOS.length) return;
-    cur = (i + PHOTOS.length) % PHOTOS.length;
-    img.src = PHOTOS[cur];
-    cnt.textContent = (cur + 1) + ' / ' + PHOTOS.length;
-    for(var k = 0; k < thumbs.length; k++){
-      thumbs[k].classList.toggle('on', parseInt(thumbs[k].getAttribute('data-i'), 10) === cur);
-    }
-  }
-  var prev = document.getElementById('prev');
-  var next = document.getElementById('next');
-  if(prev) prev.addEventListener('click', function(){ show(cur - 1); });
-  if(next) next.addEventListener('click', function(){ show(cur + 1); });
-  for(var t = 0; t < thumbs.length; t++){
-    thumbs[t].addEventListener('click', function(){
-      show(parseInt(this.getAttribute('data-i'), 10));
-    });
-  }
-  // swipe on hero
-  var hero = document.getElementById('hero'), sx = 0;
-  if(hero && PHOTOS.length > 1){
-    hero.addEventListener('touchstart', function(e){ sx = e.touches[0].clientX; }, {passive:true});
-    hero.addEventListener('touchend', function(e){
-      var dx = e.changedTouches[0].clientX - sx;
-      if(Math.abs(dx) > 40) show(dx < 0 ? cur + 1 : cur - 1);
-    });
-  }
-
-  // contact sheet
-  var ov = document.getElementById('ov'), sheet = document.getElementById('sheet');
-  function openS(){ ov.classList.add('open'); sheet.classList.add('open'); }
-  function closeS(){ ov.classList.remove('open'); sheet.classList.remove('open'); }
-  document.getElementById('open-contact').addEventListener('click', openS);
-  document.getElementById('close-contact').addEventListener('click', closeS);
-  ov.addEventListener('click', closeS);
-})();
-</script>
-</body>
-</html>`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.send(html);
   } catch (err) {
     console.error('[getGalleryPage]', err);
     res.status(500).send('Something went wrong loading this property page.');
