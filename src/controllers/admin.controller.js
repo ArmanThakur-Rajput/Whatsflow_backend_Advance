@@ -515,9 +515,9 @@ exports.exportLeadsCSV = asyncHandler(async (req, res) => {
     CustomFieldDefinition.find({ tenantId, isActive: true }).sort({ order: 1 }).lean(),
   ]);
 
-  // Build CSV header — fixed cols first, then custom fields (no status)
+  // Build CSV header — fixed cols first (incl. Status), then custom fields
   const cfHeaders = customFieldDefs.map((f) => f.label);
-  const headers = ['Name', 'Phone', 'Email', 'City', ...cfHeaders];
+  const headers = ['Name', 'Phone', 'Email', 'City', 'Status', ...cfHeaders];
 
   const escape = (val) => {
     const str = val == null ? '' : String(val);
@@ -542,6 +542,7 @@ exports.exportLeadsCSV = asyncHandler(async (req, res) => {
       escape(lead.phone ?? ''),
       escape(lead.email ?? ''),
       escape(lead.city ?? ''),
+      escape(lead.status ?? ''),
       ...cfValues,
     ].join(','));
   });
