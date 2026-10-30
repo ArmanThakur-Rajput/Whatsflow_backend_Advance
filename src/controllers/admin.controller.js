@@ -19,6 +19,8 @@ exports.getAdminStats = asyncHandler(async (req, res) => {
 
   const todayFilter = { tenantId, createdAt: { $gte: today, $lte: todayEnd } };
   const monthFilter = { tenantId, createdAt: { $gte: monthStart } };
+  // Overall (all-time) filter for the status breakdown — no date window.
+  const allTimeFilter = { tenantId, isDeleted: { $ne: true } };
 
   // Today IST string for upcomingVisitors filter (same logic as getUpcomingVisitors)
   const MONTH_NAMES_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -33,9 +35,9 @@ exports.getAdminStats = asyncHandler(async (req, res) => {
   ] = await Promise.all([
     Lead.countDocuments(monthFilter),
     Lead.countDocuments(todayFilter),
-    Lead.countDocuments({ ...todayFilter, status: 'Interested' }),
-    Lead.countDocuments({ ...todayFilter, status: 'Contacted' }),
-    Lead.countDocuments({ ...todayFilter, status: 'Not Interested' }),
+    Lead.countDocuments({ ...allTimeFilter, status: 'Interested' }),
+    Lead.countDocuments({ ...allTimeFilter, status: 'Contacted' }),
+    Lead.countDocuments({ ...allTimeFilter, status: 'Not Interested' }),
     Lead.countDocuments({ ...todayFilter, status: 'Booked' }),
     User.countDocuments({ tenantId, role: 'employee', isActive: true }),
     Lead.countDocuments({ ...monthFilter, status: 'Booked' }),
