@@ -27,7 +27,13 @@ module.exports = async (req, res, next) => {
 
     req.user = user;
     next();
-  } catch {
-    return res.status(401).json({ message: 'Invalid token' });
+  } catch (err) {
+    // Sirf asli token problem pe 401 do (app tabhi logout karta hai).
+    // DB timeout / network glitch pe 401 nahi dena, warna user random logout ho jaata hai.
+    if (err && (err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError' || err.name === 'NotBeforeError')) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+    console.error('[auth middleware] non-token error:', err && err.message);
+    return res.status(503).json({ message: 'Server busy, please retry' });
   }
 };

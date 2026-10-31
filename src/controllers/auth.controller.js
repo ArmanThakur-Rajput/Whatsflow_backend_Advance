@@ -7,7 +7,7 @@ const asyncHandler = require('../utils/asyncHandler');
 // response so the client can scope local state/UI without a second call.
 const generateToken = (id, tenantId) => {
   return jwt.sign({ id, tenantId }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    expiresIn: process.env.JWT_EXPIRES_IN || '365d',
   });
 };
 
