@@ -783,9 +783,27 @@ exports.updateVisitorDate = asyncHandler(async (req, res) => {
   );
   // Android Sept fix: "13 Sept 2026" → "13 Sep 2026"
   cleanDate = cleanDate.replace('Sept', 'Sep');
+  const hadVisit = !!lead.visitorDate;
+  const prevDate = lead.visitorDate || '';
+  const prevTime = lead.visitorTime || '';
   lead.visitorDate = cleanDate;
   // visitorTime optional hai — null bhejne par clear ho jata hai
   lead.visitorTime = visitorTime || '';
+
+  // A (re)scheduled visit always starts fresh as 'upcoming' and will get a
+  // new "did it happen?" prompt after its time passes.
+  lead.visitStatus = 'upcoming';
+  lead.visitPromptSent = false;
+  lead.visitOutcome = undefined;
+  lead.visitHistory.push({
+    action: hadVisit ? 'rescheduled' : 'scheduled',
+    date: cleanDate,
+    time: lead.visitorTime,
+    prevDate: hadVisit ? prevDate : '',
+    prevTime: hadVisit ? prevTime : '',
+    by: req.user._id,
+    byName: req.user.name || '',
+  });
 
   const timeLabel = visitorTime ? ` at ${visitorTime}` : '';
   lead.timeline.push({

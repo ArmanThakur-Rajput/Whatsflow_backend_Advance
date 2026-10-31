@@ -73,6 +73,7 @@ app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/leads', require('./routes/lead.routes'));
 app.use('/api/leads/import', require('./routes/import.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
+app.use('/api/visitors', require('./routes/visitor.routes'));
 app.use('/api/notifications', require('./routes/notification.routes'));
 app.use('/api/schedule', require('./routes/schedule.routes'));
 app.use('/api/custom-fields', require('./routes/customField.routes'));

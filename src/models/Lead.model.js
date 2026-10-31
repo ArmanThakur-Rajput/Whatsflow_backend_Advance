@@ -9,7 +9,7 @@ const timelineSchema = new mongoose.Schema({
   type: {
     type: String,
     enum: ['created', 'status_changed', 'note_added',
-      'followup_added', 'assigned', 'appointment_set'],
+      'followup_added', 'assigned', 'appointment_set', 'visit_update'],
   },
   description: String,
 }, { timestamps: true });
@@ -56,6 +56,45 @@ const leadSchema = new mongoose.Schema({
   // Visitor time — optional time of visit (e.g. "10:30 AM").
   // Stored as a formatted string, set alongside visitorDate.
   visitorTime: { type: String, default: '' },
+
+  // ── Visit lifecycle ──────────────────────────────────────────────────
+  // Stored: 'upcoming' (default) | 'completed' | 'cancelled'.
+  // "Awaiting update" is NOT stored — it is derived at read time
+  // (visitStatus === 'upcoming' AND visit date/time has already passed),
+  // so the UI is always correct even if a cron hasn't fired yet.
+  // Old leads that have no visitStatus field are treated as 'upcoming'.
+  visitStatus: {
+    type: String,
+    enum: ['upcoming', 'completed', 'cancelled'],
+    default: 'upcoming',
+  },
+
+  // true once the "did the visit happen?" notification has been sent for
+  // the CURRENT visit slot. Reset to false on schedule / reschedule.
+  visitPromptSent: { type: Boolean, default: false },
+
+  // Final outcome of the current visit (cleared whenever a new visit is
+  // scheduled). completed -> details, cancelled -> cancelReason.
+  visitOutcome: {
+    details:      { type: String, default: '' },
+    cancelReason: { type: String, default: '' },
+    closedAt:     { type: Date, default: null },
+    closedBy:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  },
+
+  // Append-only audit trail of every visit action on this lead
+  // (scheduled / rescheduled / completed / cancelled).
+  visitHistory: [{
+    action:   { type: String, enum: ['scheduled', 'rescheduled', 'completed', 'cancelled'] },
+    date:     { type: String, default: '' },   // visit date after this action
+    time:     { type: String, default: '' },
+    prevDate: { type: String, default: '' },   // only for 'rescheduled'
+    prevTime: { type: String, default: '' },
+    note:     { type: String, default: '' },   // details / reason
+    by:       { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    byName:   { type: String, default: '' },
+    at:       { type: Date, default: Date.now },
+  }],
 
   // Admin-defined dynamic fields for this tenant's business (e.g. a
   // tour operator might define "Package Type" / "Travel Date"; a bank
@@ -111,6 +150,8 @@ leadSchema.index({ tenantId: 1, assignedTo: 1, status: 1 });
 leadSchema.index({ tenantId: 1, status: 1, updatedAt: -1 });
 leadSchema.index({ tenantId: 1, assignedTo: 1, statusUpdatedAt: -1 });
 leadSchema.index({ tenantId: 1, createdAt: -1 });
+// Visitors screen / cron: leads of a tenant that have a visit date
+leadSchema.index({ tenantId: 1, visitorDate: 1, visitStatus: 1 });
 
 // ─── Auto-assign hook ────────────────────────────────────────────────────────
 // Runs AFTER a brand-new lead is saved (isNew = true).

@@ -29,6 +29,15 @@ const Lead = require('../models/Lead.model');
 const User = require('../models/User.model');
 const Notification = require('../models/Notification.model');
 const sendPushNotification = require('./sendPushNotification');
+const {
+  visitAtUTC,
+  istDateString,
+  PROMPT_DELAY_MIN,
+} = require('./visitStatus');
+
+// Completed / cancelled visits must never trigger reminders.
+// $nin also matches old leads that have no visitStatus field at all.
+const ACTIVE_VISIT = { visitStatus: { $nin: ['completed', 'cancelled'] } };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -122,7 +131,7 @@ function parseVisitorTime(timeStr) {
 
 // ─── Core: recipients collect + notification bhejo ───────────────────────────
 
-async function dispatchNotification(lead, title, body) {
+async function dispatchNotification(lead, title, body, type = 'visitor_date_reminder') {
   const admins = await User.find({
     tenantId: lead.tenantId,
     role: 'admin',
@@ -150,7 +159,7 @@ async function dispatchNotification(lead, title, body) {
 
   const pushData = {
     leadId: String(lead._id),
-    type: 'visitor_date_reminder',
+    type,
   };
 
   const notifDocs = [...recipientMap.values()].map((u) => ({
@@ -160,6 +169,7 @@ async function dispatchNotification(lead, title, body) {
     message: body,
     type: 'alert',
     broadcast: false,
+    data: pushData, // so tapping the in-app notification can open the lead / outcome sheet
   }));
 
   await Notification.insertMany(notifDocs);
@@ -186,6 +196,7 @@ async function sendEveNotifications() {
   const leads = await Lead.find({
     visitorDate: tomorrow,
     isDeleted: false,
+    ...ACTIVE_VISIT,
   }).select('_id name phone tenantId assignedTo visitorDate visitorTime').lean();
 
   if (!leads.length) {
@@ -214,6 +225,7 @@ async function scheduleDayOfNotifications() {
   const leads = await Lead.find({
     visitorDate: today,
     isDeleted: false,
+    ...ACTIVE_VISIT,
     visitorTime: { $nin: ['', null] },
   }).select('_id name phone tenantId assignedTo visitorDate visitorTime').lean();
 
@@ -269,6 +281,59 @@ async function scheduleDayOfNotifications() {
   }
 }
 
+// ─── 3. Outcome prompt — "Did the visit happen?" ────────────────────────────
+// Runs every 10 minutes. For every still-'upcoming' visit whose time passed
+// PROMPT_DELAY_MIN minutes ago, send ONE notification asking the assigned
+// employee + admins to mark it Completed / Reschedule / Cancelled.
+// Visits with no time are treated as 6 PM IST (see visitStatus.js).
+// visitPromptSent makes it fire exactly once per visit slot (reset on reschedule).
+
+async function sendVisitOutcomePrompts() {
+  // Look back 7 days so a server outage doesn't silently drop prompts.
+  // Both padded ("05 Aug 2026") and unpadded ("5 Aug 2026") spellings are matched.
+  const dates = [];
+  for (let i = 0; i >= -7; i--) {
+    const s = istDateString(i);
+    dates.push(s);
+    if (s.startsWith('0')) dates.push(s.slice(1));
+  }
+
+  const leads = await Lead.find({
+    visitorDate: { $in: dates },
+    isDeleted: false,
+    visitPromptSent: { $ne: true },
+    ...ACTIVE_VISIT,
+  }).select('_id name phone tenantId assignedTo visitorDate visitorTime').lean();
+
+  if (!leads.length) return;
+
+  const now = Date.now();
+  for (const lead of leads) {
+    try {
+      const at = visitAtUTC(lead.visitorDate, lead.visitorTime);
+      if (!at) continue;
+      if (now < at.getTime() + PROMPT_DELAY_MIN * 60 * 1000) continue; // not yet
+
+      // Atomically claim the prompt so two server instances can't both send it.
+      const claimed = await Lead.findOneAndUpdate(
+        { _id: lead._id, visitPromptSent: { $ne: true }, ...ACTIVE_VISIT },
+        { $set: { visitPromptSent: true } },
+        { new: false }
+      );
+      if (!claimed) continue;
+
+      const timeLabel = lead.visitorTime ? ` (${lead.visitorTime})` : '';
+      const title = `📍 Visit update needed: ${lead.name}`;
+      const body =
+        `Did ${lead.name}'s visit${timeLabel} on ${lead.visitorDate} happen? ` +
+        `Mark it Completed, Reschedule or Cancelled.`;
+      await dispatchNotification(lead, title, body, 'visit_outcome_prompt');
+    } catch (err) {
+      console.error(`[VisitorNotifier] Outcome prompt error for lead ${lead._id}:`, err.message);
+    }
+  }
+}
+
 // ─── Cron registration ───────────────────────────────────────────────────────
 
 function startVisitorDateNotifier() {
@@ -282,7 +347,21 @@ function startVisitorDateNotifier() {
     await scheduleDayOfNotifications();
   }, { timezone: 'UTC' });
 
-  console.log('[VisitorNotifier] Eve (8 PM IST) & Day-of scheduler (6 AM IST) crons registered');
+  // ── 3. OUTCOME PROMPT — every 10 minutes ────────────────────────────────
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      await sendVisitOutcomePrompts();
+    } catch (err) {
+      console.error('[VisitorNotifier] Outcome prompt cron error:', err.message);
+    }
+  }, { timezone: 'UTC' });
+
+  console.log('[VisitorNotifier] Eve (8 PM IST), Day-of (6 AM IST) & Outcome-prompt (10 min) crons registered');
 }
 
-module.exports = { startVisitorDateNotifier, scheduleDayOfNotifications, sendEveNotifications };
+module.exports = {
+  startVisitorDateNotifier,
+  scheduleDayOfNotifications,
+  sendEveNotifications,
+  sendVisitOutcomePrompts,
+};

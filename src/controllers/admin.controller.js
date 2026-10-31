@@ -45,7 +45,7 @@ exports.getAdminStats = asyncHandler(async (req, res) => {
     Lead.countDocuments({ tenantId, status: 'Pending' }),
     Lead.countDocuments({ tenantId, status: 'Booked' }),
     Lead.countDocuments({ tenantId, isDeleted: false }),
-    Lead.find({ tenantId, isDeleted: false, visitorDate: { $nin: ['', null] } }, 'visitorDate').lean(),
+    Lead.find({ tenantId, isDeleted: false, visitorDate: { $nin: ['', null] }, visitStatus: { $nin: ['completed', 'cancelled'] } }, 'visitorDate').lean(),
   ]);
 
   // Filter upcoming visitors (today + future) same logic as getUpcomingVisitors
@@ -677,6 +677,7 @@ exports.getUpcomingVisitors = asyncHandler(async (req, res) => {
     tenantId,
     isDeleted: false,
     visitorDate: { $nin: ['', null] },
+    visitStatus: { $nin: ['completed', 'cancelled'] },
   })
     .populate('assignedTo', 'name email')
     .sort({ visitorDate: 1 })
@@ -723,6 +724,10 @@ exports.removeFromVisitors = asyncHandler(async (req, res) => {
   }
 
   lead.visitorDate = '';
+  lead.visitorTime = '';
+  lead.visitStatus = 'upcoming';
+  lead.visitPromptSent = false;
+  lead.visitOutcome = undefined;
   lead.timeline.push({
     type: 'status_changed',
     description: `Visitor date removed by ${req.user.name}`,
