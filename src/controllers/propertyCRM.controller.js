@@ -408,7 +408,6 @@ function buildSharePayload(p, isShareLink) {
     ['calendar', 'Property Age', p.propertyAge],
     ['key', 'Possession', p.possession],
     ['filecheck', 'Sanction', p.sanction],
-    ['layers', 'Floor', p.floor],
   ].filter((d) => d[2] != null && String(d[2]).trim() !== '').map((d) => [d[0], d[1], String(d[2])]);
 
   // SAFE MODE: sirf area dikhao. Full address, society name, landmarks, notes kabhi nahi.
